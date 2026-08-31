@@ -1,0 +1,708 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>HouseTrip · Robin</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;500;600;700&family=DM+Mono:wght@300;400&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #0d0f0e;
+    --surface: #161918;
+    --surface2: #1e2220;
+    --border: rgba(255,255,255,0.07);
+    --border2: rgba(255,255,255,0.12);
+    --text: #f0ede8;
+    --muted: rgba(240,237,232,0.45);
+    --faint: rgba(240,237,232,0.18);
+    --green: #4ade9a;
+    --green-dim: rgba(74,222,154,0.12);
+    --amber: #f5c542;
+    --amber-dim: rgba(245,197,66,0.10);
+    --red: #ff5f57;
+    --red-dim: rgba(255,95,87,0.12);
+    --blue: #60aaff;
+    --blue-dim: rgba(96,170,255,0.10);
+    --r: 10px;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--text); font-family: 'Syne', sans-serif; min-height: 100vh; padding-bottom: 3rem; }
+
+
+  /* APP */
+
+  header { padding: 2rem 1.25rem 1rem; display: flex; align-items: flex-end; justify-content: space-between; }
+  .header-left h1 { font-size: 26px; font-weight: 700; letter-spacing: -0.01em; }
+  .header-left p { font-size: 12px; color: var(--muted); font-family: 'DM Mono', monospace; margin-top: 3px; }
+
+  .esta-badge { display: flex; flex-direction: column; align-items: flex-end; gap: 2px; }
+  .esta-days { font-size: 22px; font-weight: 700; line-height: 1; color: var(--green); }
+  .esta-days.warn { color: var(--amber); }
+  .esta-days.danger { color: var(--red); }
+  .esta-unit { font-size: 11px; color: var(--muted); font-family: 'DM Mono', monospace; }
+  .esta-label { font-size: 10px; font-family: 'DM Mono', monospace; color: var(--muted); text-transform: uppercase; letter-spacing: 0.08em; }
+  .esta-bar-wrap { width: 80px; height: 3px; background: var(--border2); border-radius: 99px; overflow: hidden; margin-top: 4px; }
+  .esta-bar { height: 100%; border-radius: 99px; background: var(--green); }
+  .esta-bar.warn { background: var(--amber); }
+  .esta-bar.danger { background: var(--red); }
+
+  .tabs { display: flex; gap: 6px; padding: 0 1.25rem; margin-bottom: 1.25rem; }
+  .tab { flex: 1; padding: 9px 0; border-radius: var(--r); border: 0.5px solid var(--border); background: var(--surface); color: var(--muted); font-family: 'Syne', sans-serif; font-size: 12px; font-weight: 500; cursor: pointer; letter-spacing: 0.03em; transition: all 0.15s; text-align: center; }
+  .tab.active { background: var(--surface2); border-color: var(--border2); color: var(--text); }
+
+  .panel { display: none; padding: 0 1.25rem; }
+  .panel.active { display: block; }
+
+  /* TIMELINE */
+  .timeline { position: relative; }
+  .tl-line { position: absolute; left: 19px; top: 8px; bottom: 8px; width: 1px; background: var(--border2); }
+  .tl-item { display: flex; gap: 14px; margin-bottom: 10px; animation: fadeUp 0.3s ease both; }
+  .tl-dot-wrap { flex-shrink: 0; width: 38px; display: flex; flex-direction: column; align-items: center; padding-top: 14px; }
+  .tl-dot { width: 10px; height: 10px; border-radius: 50%; border: 2px solid var(--border2); background: var(--bg); }
+  .tl-dot.flight { border-color: var(--blue); background: var(--blue-dim); }
+  .tl-dot.bus { border-color: var(--green); background: var(--green-dim); }
+  .tl-dot.train { border-color: var(--amber); background: var(--amber-dim); }
+  .tl-dot.stay { border-color: var(--faint); background: var(--bg); }
+
+  .tl-card { flex: 1; background: var(--surface); border: 0.5px solid var(--border); border-radius: var(--r); padding: 12px 14px; cursor: pointer; transition: border-color 0.15s; }
+  .tl-card:hover { border-color: var(--border2); }
+  .tl-card.expanded { border-color: var(--border2); }
+  .tl-card-header { display: flex; align-items: center; justify-content: space-between; }
+
+  .tl-type-pill { font-size: 10px; font-family: 'DM Mono', monospace; padding: 2px 7px; border-radius: 99px; letter-spacing: 0.06em; text-transform: uppercase; }
+  .pill-flight { background: var(--blue-dim); color: var(--blue); }
+  .pill-bus { background: var(--green-dim); color: var(--green); }
+  .pill-train { background: var(--amber-dim); color: var(--amber); }
+  .pill-stay { background: var(--faint); color: var(--muted); }
+
+  .tl-date { font-size: 11px; font-family: 'DM Mono', monospace; color: var(--muted); }
+  .tl-title { font-size: 15px; font-weight: 600; margin-top: 6px; line-height: 1.3; }
+  .tl-sub { font-size: 12px; color: var(--muted); margin-top: 2px; }
+
+  .tl-details { display: none; margin-top: 12px; padding-top: 12px; border-top: 0.5px solid var(--border); flex-direction: column; gap: 8px; }
+  .tl-details.open { display: flex; }
+
+  .detail-row { display: flex; justify-content: space-between; align-items: center; }
+  .detail-label { font-size: 11px; font-family: 'DM Mono', monospace; color: var(--muted); }
+  .detail-value { font-size: 12px; font-weight: 500; text-align: right; }
+  .detail-value a { color: var(--blue); text-decoration: none; }
+  .detail-value a:hover { text-decoration: underline; }
+
+  /* QR */
+  .qr-wrap { display: flex; justify-content: center; padding: 4px 0; }
+  .qr-wrap img { width: 120px; height: 120px; border-radius: 6px; background: #fff; padding: 4px; }
+
+  /* LAYOVER CONNECTOR */
+  .layover-connector {
+    display: flex; align-items: center; gap: 10px;
+    margin: -2px 0 8px 52px;
+    animation: fadeUp 0.3s ease both;
+  }
+  .layover-line { flex: 1; height: 1px; background: var(--border2); }
+  .layover-pill {
+    font-size: 10px; font-family: 'DM Mono', monospace;
+    color: var(--amber); background: var(--amber-dim);
+    border: 0.5px solid rgba(245,197,66,0.2);
+    padding: 3px 9px; border-radius: 99px;
+    white-space: nowrap; letter-spacing: 0.04em;
+  }
+
+  /* INFO CARDS */
+  .card-grid { display: flex; flex-direction: column; gap: 10px; }
+  .info-card { background: var(--surface); border: 0.5px solid var(--border); border-radius: var(--r); padding: 14px 16px; cursor: pointer; transition: border-color 0.15s; }
+  .info-card:hover { border-color: var(--border2); }
+  .info-card.expanded { border-color: var(--border2); }
+  .ic-header { display: flex; align-items: center; justify-content: space-between; }
+  .ic-city { font-size: 17px; font-weight: 700; }
+  .ic-dates { font-size: 11px; font-family: 'DM Mono', monospace; color: var(--muted); margin-top: 3px; }
+  .ic-tag { font-size: 10px; font-family: 'DM Mono', monospace; color: var(--muted); border: 0.5px solid var(--border2); border-radius: 99px; padding: 2px 8px; }
+  .ic-details { display: none; margin-top: 12px; padding-top: 12px; border-top: 0.5px solid var(--border); flex-direction: column; gap: 8px; }
+  .ic-details.open { display: flex; }
+
+  .section-label { font-size: 10px; font-family: 'DM Mono', monospace; color: var(--faint); text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 10px; margin-top: 0.5rem; }
+  .empty-note { font-size: 12px; font-family: 'DM Mono', monospace; color: var(--faint); text-align: center; padding: 1rem 0; }
+
+  .copy-btn { font-family: 'DM Mono', monospace; font-size: 10px; color: var(--muted); background: var(--surface2); border: 0.5px solid var(--border2); border-radius: 6px; padding: 2px 7px; cursor: pointer; transition: color 0.15s; }
+  .copy-btn:active { color: var(--green); }
+
+  @keyframes fadeUp { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+</style>
+</head>
+<body>
+
+<div id="app" style="display:block">
+  <header>
+    <div class="header-left">
+      <h1>HouseTrip</h1>
+      <p>usa · apr – jun 2026</p>
+    </div>
+    <div class="esta-badge">
+      <div style="display:flex;align-items:baseline;gap:4px">
+        <div class="esta-days" id="esta-days">33</div>
+        <div class="esta-unit">Days</div>
+      </div>
+      <div class="esta-label">/ 90 days esta</div>
+      <div class="esta-bar-wrap">
+        <div class="esta-bar" id="esta-bar" style="width:37%"></div>
+      </div>
+    </div>
+  </header>
+
+  <div class="tabs">
+    <button class="tab active" onclick="showTab('trip')">Trip</button>
+    <button class="tab" onclick="showTab('stays')">Stays</button>
+    <button class="tab" onclick="showTab('transport')">Transport</button>
+    <button class="tab" onclick="showTab('visa')">Visa</button>
+  </div>
+
+  <!-- TRIP TAB -->
+  <div class="panel active" id="panel-trip">
+    <p class="section-label">Full timeline</p>
+    <div class="timeline">
+      <div class="tl-line"></div>
+
+      <!-- 1. Flight out FRA→JFK -->
+      <div class="tl-item" style="animation-delay:0.05s">
+        <div class="tl-dot-wrap"><div class="tl-dot flight"></div></div>
+        <div class="tl-card" onclick="toggleCard(this)">
+          <div class="tl-card-header">
+            <span class="tl-type-pill pill-flight">Flight</span>
+            <span class="tl-date">Thu 23 Apr</span>
+          </div>
+          <div class="tl-title">Frankfurt → New York</div>
+          <div class="tl-sub">FRA 11:50 → JFK 14:36 · 9h 46m · KL6107</div>
+          <div class="tl-details">
+            <div class="detail-row"><span class="detail-label">Booking code</span><span class="detail-value" style="display:flex;align-items:center;gap:6px">XGTGX2 <button class="copy-btn" onclick="event.stopPropagation();copyText('XGTGX2',this)">copy</button></span></div>
+            <div class="detail-row"><span class="detail-label">Flight</span><span class="detail-value">KL6107 (operated by Delta)</span></div>
+            <div class="detail-row"><span class="detail-label">Aircraft</span><span class="detail-value">Airbus A330-200</span></div>
+            <div class="detail-row"><span class="detail-label">Boarding</span><span class="detail-value">10:55</span></div>
+            <div class="detail-row"><span class="detail-label">Seat</span><span class="detail-value">33F · Class V</span></div>
+            <div class="detail-row"><span class="detail-label">Zone</span><span class="detail-value">7</span></div>
+            <div class="detail-row"><span class="detail-label">Duration</span><span class="detail-value">9h 46m</span></div>
+            <div class="detail-row"><span class="detail-label">Price</span><span class="detail-value">€573.48 (return)</span></div>
+            <div class="detail-row"><span class="detail-label">Maps – JFK</span><span class="detail-value"><a href="https://maps.google.com/?q=JFK+Airport+New+York" target="_blank">Open ↗</a></span></div>
+            <div class="qr-wrap"><img src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAM0AAADNAQAAAAAzx8nEAAACb0lEQVR4nO2YMY7jOBBFX5kGqIy+AQ3MOdrqPdKGA8htzegge5SR2hehbkBlNCD7byAHm8xuNDQwWEYCKmCh6v/iK5n4ybntfhaB3zc0mVkjOx9v73yz5hMwMztWTWOPCRrLh9jYIlmLW33h/qV2oRY7Mh1c0sj9qJGvRybrX9KvEx23j7Cfbx+h/8V3/UvI8t3892VQc533L0gDTZL8Iyj5SSt+DJKX1ljqVkNmxnU+t7D0EZvPx5vZvnZTWklFBzeVEy7xFn2SpFR9bpzN/sj3420Hc2G5WcPSV5do6KN+HFziLe5jA7DsuNcdX+gRVmi1ok2d2SXa7FRVomjKxAJEwMk/uKiYhtppKLuEaY1PwwJ+pKttWMIa9ViGVGQ9xaSEqbJh0UgX/YhTsUz0kySNoXJT9oBLIODt4JK14c+/kuVfcdd/OGVIWH6qRFMm0qqvqw00bRmAf0AsBKXSSvWdcpEfIXLikmhztwmkulPsuFyyS3yGfSyKPpXTUhkC0ZQvCSD6EZek3AG158bWlHIKgwCXCkHSlC+1tTEGyT8AjVySlJ8o9JI3JSiVNncRggTUrwbd8/O0CeQiqht2xwmXyokOP4ae5R0osnNdp+y45nvbmPbwufT4MexnrvJ1IXDDnkLoo5cGle3BDS+QqNMGGOBSabXCK7BHkqbcIW3Y00WNofKegkbAT1pjOYUNwWJ9+npubSMubQD0gKgRqkPgYkfga9sAcM3M9h6G2k6ZMtE/uIg2E2kzUXrNMPdjWCOmIWnSsEFHdd5QgqWf9ePQcfvg3hbF6qu0zAzCkABopgNzw7LWTcP+/yH5j/M3SQSpnzEoG0MAAAAASUVORK5CYII=" alt="KLM Boarding Pass QR"></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="layover-connector" style="animation-delay:0.08s">
+        <div class="layover-line"></div>
+        <div class="layover-pill">6h 54m until bus</div>
+        <div class="layover-line"></div>
+      </div>
+
+      <!-- 2. FlixBus NY→Chicago -->
+      <div class="tl-item" style="animation-delay:0.10s">
+        <div class="tl-dot-wrap"><div class="tl-dot bus"></div></div>
+        <div class="tl-card" onclick="toggleCard(this)">
+          <div class="tl-card-header">
+            <span class="tl-type-pill pill-bus">Bus</span>
+            <span class="tl-date">Thu 23 Apr – Fri 24 Apr</span>
+          </div>
+          <div class="tl-title">New York → Chicago</div>
+          <div class="tl-sub">Midtown 21:30 → Chicago 13:25 · 15h 55m · N2641</div>
+          <div class="tl-details">
+            <div class="detail-row"><span class="detail-label">Booking no.</span><span class="detail-value">334 771 1876</span></div>
+            <div class="detail-row"><span class="detail-label">Route</span><span class="detail-value">N2641 · FlixBus</span></div>
+            <div class="detail-row"><span class="detail-label">Seat</span><span class="detail-value">8B</span></div>
+            <div class="detail-row"><span class="detail-label">Duration</span><span class="detail-value">15h 55m</span></div>
+            <div class="detail-row"><span class="detail-label">Luggage</span><span class="detail-value">1× carry-on + 1× checked 20 kg</span></div>
+            <div class="detail-row"><span class="detail-label">Price</span><span class="detail-value">€77.78</span></div>
+            <div class="detail-row"><span class="detail-label">Departs</span><span class="detail-value"><a href="https://maps.google.com/?q=300+W+31st+Street+New+York" target="_blank">31st & 8th Ave ↗</a></span></div>
+            <div class="detail-row"><span class="detail-label">Arrives</span><span class="detail-value"><a href="https://maps.google.com/?q=630+W+Harrison+St+Chicago" target="_blank">Chicago Bus Station ↗</a></span></div>
+            <div class="qr-wrap"><img src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAASYAAAEmAQAAAADnvwB3AAADHUlEQVR4nO2aQYrkPAyFP5cNvXRgDtBHcW42V1OOMjdwlg0Kbxay80/DD1OLhq6EMUVRFbTQQ5H19KQk/n6OxxNG8M/qO632lFIq+8qe2Ndj2Y4F2Mq+sq8ppZTWF/b+qaPeJOWOV8sdqiSTDPCqLKk3f1Xvn8cILUsOXqUONKqc5lW5ky+PcVrtqdDKvqYFqgGlGvv67X59pVVVlgU69qRfydnKC/j1FVYzHyXJvMpp6khG1Xh++XcVdYDc2/9+ALg6xkfEy4FqDh8LDseCV/t4N0mSvbD3z1nta1q29G6MBNzSAlDY2NfCdqQ71EenRVZ6tSybFbOpt6gsF39XUW9Ui7sl/ubevAoa1STdAiNOc4hyP4o+LXcASV51eYyy3MkypxHQqnk1r0Y1ye5QOyRoGseocccqIhgG18doQXL+oOWWezDYljv5Bhg7eRCbAdOrfOapOtwhH0dzEVerNJLRmRfsHTCa0yTFd46CWG1kZecOd87k5AEtd0YEadR4eIM4SuOdtKABQQAkmyl59Tg+YCuh3sDxbg5lXx2AEp96dU7OpKZE7Ebgqqg27tXLc7kH8LFQaJIdS3vrFLYCufPWKdFgvrL3z1jta+44W9lTCDhOg833nw7+fX59nVU0GhBXTZQMWmg7IRHcgcsFWwtCLvPB61qorMFiL4/x7DikLJ2a6knL74AxWJw0WCvkHmRg9M734HKzbRwKZEQ2EjPYzvUxTtk/0FXzP0YegF++PkYPFToAk6+ObivS8/pxfACFAXM8i3nHFHn82/z6Kqu4VwGyTBLVokqGDulV159b8YmjTtkqwqo+2Oz1MUq9UUftUCfPqWtWLAvcAKONGkH7pG+c7O7yd86YBeTOf7pcjJXHTJlbxFHjdZ0jcvUxNI95x/XjOPc6hmC+Rc8IlGrHMn6/sPdPnXOvYxaRNicgjZvoAJ/2OtQ59zpCW+YefDUwnsPxapImWEJMvjjGc3dj8x/9+NETHKVtcLwr0UqFajfYl4uxzlun7CmKSFT/GPTkX+tLe//EmXsdZ/84xORgAnCDuVX6t9t5C6vfQqgJ8IC5IooAAAAASUVORK5CYII=" alt="FlixBus QR"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 3. HI Chicago hostel -->
+      <div class="tl-item" style="animation-delay:0.13s">
+        <div class="tl-dot-wrap"><div class="tl-dot stay"></div></div>
+        <div class="tl-card" onclick="toggleCard(this)">
+          <div class="tl-card-header">
+            <span class="tl-type-pill pill-stay">Hostel</span>
+            <span class="tl-date">Fri 24 Apr</span>
+          </div>
+          <div class="tl-title">HI Chicago</div>
+          <div class="tl-sub">1 night · Men's 10-Bed Dorm · check-in after 4pm</div>
+          <div class="tl-details">
+            <div class="detail-row"><span class="detail-label">Confirmation</span><span class="detail-value">#16263020</span></div>
+            <div class="detail-row"><span class="detail-label">Check-in</span><span class="detail-value">after 4pm</span></div>
+            <div class="detail-row"><span class="detail-label">Check-out</span><span class="detail-value">Sat 25 Apr · by 11am</span></div>
+            <div class="detail-row"><span class="detail-label">Total</span><span class="detail-value">$57.06</span></div>
+            <div class="detail-row"><span class="detail-label">Address</span><span class="detail-value"><a href="https://maps.google.com/?q=24+East+Ida+B+Wells+Drive+Chicago+IL+60605" target="_blank">24 E Ida B Wells Dr ↗</a></span></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 4. Chicago THS stay -->
+      <div class="tl-item" style="animation-delay:0.16s">
+        <div class="tl-dot-wrap"><div class="tl-dot stay"></div></div>
+        <div class="tl-card" onclick="toggleCard(this)">
+          <div class="tl-card-header">
+            <span class="tl-type-pill pill-stay">Stay</span>
+            <span class="tl-date">25 Apr – 05 May</span>
+          </div>
+          <div class="tl-title">Chicago, IL</div>
+          <div class="tl-sub">10 nights · TrustedHousesitters</div>
+          <div class="tl-details">
+            <div class="detail-row"><span class="detail-label">Parent</span><span class="detail-value">Kara</span></div>
+            <div class="detail-row"><span class="detail-label">Address</span><span class="detail-value"><a href="https://maps.google.com/?q=215+E+Chestnut+Street+Chicago+IL+60611" target="_blank">215 E Chestnut St, Apt 204</a></span></div>
+            <div class="detail-row"><span class="detail-label">Dogs</span><span class="detail-value">Apolo & Berkeley</span></div>
+            <div class="detail-row"><span class="detail-label">Walk</span><span class="detail-value">60 mins total</span></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 5. ORD→LGA flight -->
+      <div class="tl-item" style="animation-delay:0.19s">
+        <div class="tl-dot-wrap"><div class="tl-dot flight"></div></div>
+        <div class="tl-card" onclick="toggleCard(this)">
+          <div class="tl-card-header">
+            <span class="tl-type-pill pill-flight">Flight</span>
+            <span class="tl-date">Wed 6 May</span>
+          </div>
+          <div class="tl-title">Chicago → New York</div>
+          <div class="tl-sub">ORD 08:55 → LGA 12:11 · 3h 16m · AA2079</div>
+          <div class="tl-details">
+            <div class="detail-row"><span class="detail-label">Booking code</span><span class="detail-value" style="display:flex;align-items:center;gap:6px">0012340142179 <button class="copy-btn" onclick="event.stopPropagation();copyText('0012340142179',this)">copy</button></span></div>
+            <div class="detail-row"><span class="detail-label">Flight</span><span class="detail-value">AA2079 · American Airlines</span></div>
+            <div class="detail-row"><span class="detail-label">Class</span><span class="detail-value">Economy (B)</span></div>
+            <div class="detail-row"><span class="detail-label">Duration</span><span class="detail-value">3h 16m</span></div>
+            <div class="detail-row"><span class="detail-label">Price</span><span class="detail-value">$202.20</span></div>
+            <div class="detail-row"><span class="detail-label">Departs</span><span class="detail-value"><a href="https://maps.google.com/?q=Chicago+O'Hare+Airport" target="_blank">Chicago O'Hare ↗</a></span></div>
+            <div class="detail-row"><span class="detail-label">Arrives</span><span class="detail-value"><a href="https://maps.google.com/?q=LaGuardia+Airport+New+York" target="_blank">New York LaGuardia ↗</a></span></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 6. Brooklyn stay -->
+      <div class="tl-item" style="animation-delay:0.22s">
+        <div class="tl-dot-wrap"><div class="tl-dot stay"></div></div>
+        <div class="tl-card" onclick="toggleCard(this)">
+          <div class="tl-card-header">
+            <span class="tl-type-pill pill-stay">Stay</span>
+            <span class="tl-date">06 – 21 May</span>
+          </div>
+          <div class="tl-title">Brooklyn, NY</div>
+          <div class="tl-sub">15 nights · TrustedHousesitters</div>
+          <div class="tl-details">
+            <div class="detail-row"><span class="detail-label">Parent</span><span class="detail-value">Jared</span></div>
+            <div class="detail-row"><span class="detail-label">Dogs</span><span class="detail-value">Bruce & Remi</span></div>
+            <div class="detail-row"><span class="detail-label">Walk</span><span class="detail-value">30 mins</span></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 7. FlixBus NY→DC -->
+      <div class="tl-item" style="animation-delay:0.25s">
+        <div class="tl-dot-wrap"><div class="tl-dot bus"></div></div>
+        <div class="tl-card" onclick="toggleCard(this)">
+          <div class="tl-card-header">
+            <span class="tl-type-pill pill-bus">Bus</span>
+            <span class="tl-date">Fri 22 May</span>
+          </div>
+          <div class="tl-title">New York → Washington D.C.</div>
+          <div class="tl-sub">Port Authority 02:30 → Union Station 08:15 · 5h 45m · US0670</div>
+          <div class="tl-details">
+            <div class="detail-row"><span class="detail-label">Booking no.</span><span class="detail-value" style="display:flex;align-items:center;gap:6px">335 687 1749 <button class="copy-btn" onclick="event.stopPropagation();copyText('3356871749',this)">copy</button></span></div>
+            <div class="detail-row"><span class="detail-label">Route</span><span class="detail-value">US0670 · FlixBus / Greyhound</span></div>
+            <div class="detail-row"><span class="detail-label">Seat</span><span class="detail-value">3D</span></div>
+            <div class="detail-row"><span class="detail-label">Duration</span><span class="detail-value">5h 45m</span></div>
+            <div class="detail-row"><span class="detail-label">Price</span><span class="detail-value">€64.17</span></div>
+            <div class="detail-row"><span class="detail-label">Departs</span><span class="detail-value"><a href="https://maps.google.com/?q=625+8th+Ave+New+York+NY+10018" target="_blank">Port Authority, 625 8th Ave ↗</a></span></div>
+            <div class="detail-row"><span class="detail-label">Arrives</span><span class="detail-value"><a href="https://maps.google.com/?q=50+Massachusetts+Ave+NE+Washington+DC" target="_blank">Washington Union Station ↗</a></span></div>
+            <div class="qr-wrap"><img src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAQ4AAAEOAQAAAABQysQIAAACm0lEQVR4nO2aQYqrRwyEvx4ZZilDDpCjyDd7V+s5Sg4Q0L80aKgs1L8nm+CBJDw3vMYLD9ZChVpVJfUM8eR8vj2LgF8h/2cISgDTtAxTVyyUAdHf65XS/R6ikNRYlGGaysAXQOWWiCAswWe5lDQQSZbYfoi+Quq4vSfjGsXHuH5w3H5eLv9JSLxn1DHK5xg/JI3rz8vlX4VcAMEF7r/lIN7/HFYfA6y4uDheK93vhXyMMYD3P26WQHD8sAyO2+cY4/py6T496pP9V+BTGSYV0b/sxgzNdUuPGo6S/gLYpohc0iyfrarlOhU2NlVY6/xduJZzcFnue+son+VzKWzboYwCJVsiengDovrKaUoLHb4jomlapamzrRpgk/l+iBJ84qr1mUpwmWYRm3Jd+ZSmdddAuXDVqU37IdLEJ0tqJy680c3q6/dK6X7z1rVDwGVJETTM1qb9+ugN4vPKxSfHuP8+LTHNcUVJD02vlu7TIwmfRUA8WEJSq9KefSSTunEsQ91BYNpWjxJLCgDLwFXQ1M2WffTFdRAF50YoTLPLtx+iBJcyWo9YRkh9A2vHW6fFbw95bYqTVL5njaS2QKZZrtOsCl8bvP0QZZRrzePLstK2wTadjyQ11/nsyaJYGJWbcp0sAXpRXAsIPapv2UcZS3189hCBT9MEILasUUbPsKfZbuO6TN2uNXooEefbBNGdtWmNlPSb0clv09p4E1vOR+dOdW0V+NozaFPvndBE523n1H3Uj0ob6tEbhCSOUcdNyf1KHbfeC7X9frV0n56vNz4wybSo+1G7DWt0Htd9jPuV+7hJ8wLluo/bq6b7j+dRo978WK569WJ/wxp9vZW3nWs9WuN5xpbzUQL8fUUMWK/3t+yj8eu/aF4+5C8ed6DKJY1KAAAAAABJRU5ErkJggg==" alt="FlixBus DC QR"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 8. Washington DC stay -->
+      <div class="tl-item" style="animation-delay:0.28s">
+        <div class="tl-dot-wrap"><div class="tl-dot stay"></div></div>
+        <div class="tl-card" onclick="toggleCard(this)">
+          <div class="tl-card-header">
+            <span class="tl-type-pill pill-stay">Stay</span>
+            <span class="tl-date">22 – 25 May</span>
+          </div>
+          <div class="tl-title">Washington, D.C.</div>
+          <div class="tl-sub">3 nights · TrustedHousesitters</div>
+          <div class="tl-details">
+            <div class="detail-row"><span class="detail-label">Parent</span><span class="detail-value">Lia</span></div>
+            <div class="detail-row"><span class="detail-label">Dogs</span><span class="detail-value">Bartleby & Oswald</span></div>
+            <div class="detail-row"><span class="detail-label">Cats</span><span class="detail-value">Reggie & Sammy</span></div>
+            <div class="detail-row"><span class="detail-label">Walk</span><span class="detail-value">No walk needed</span></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 9. FlixBus DC→NY -->
+      <div class="tl-item" style="animation-delay:0.31s">
+        <div class="tl-dot-wrap"><div class="tl-dot bus"></div></div>
+        <div class="tl-card" onclick="toggleCard(this)">
+          <div class="tl-card-header">
+            <span class="tl-type-pill pill-bus">Bus</span>
+            <span class="tl-date">Mon 25 May</span>
+          </div>
+          <div class="tl-title">Washington D.C. → New York</div>
+          <div class="tl-sub">Bethesda 08:35 → NY Midtown 12:45 · 4h 10m · 2601</div>
+          <div class="tl-details">
+            <div class="detail-row"><span class="detail-label">Booking no.</span><span class="detail-value" style="display:flex;align-items:center;gap:6px">335 687 1749 <button class="copy-btn" onclick="event.stopPropagation();copyText('3356871749',this)">copy</button></span></div>
+            <div class="detail-row"><span class="detail-label">Route</span><span class="detail-value">2601 · FlixBus</span></div>
+            <div class="detail-row"><span class="detail-label">Seat</span><span class="detail-value">14C</span></div>
+            <div class="detail-row"><span class="detail-label">Duration</span><span class="detail-value">4h 10m</span></div>
+            <div class="detail-row"><span class="detail-label">Departs</span><span class="detail-value"><a href="https://maps.google.com/?q=4550+Montgomery+Ave+Bethesda+MD+20814" target="_blank">Bethesda, 4550 Montgomery Ave ↗</a></span></div>
+            <div class="detail-row"><span class="detail-label">Arrives</span><span class="detail-value"><a href="https://maps.google.com/?q=300+W+31st+Street+New+York" target="_blank">NY Midtown, 31st & 8th ↗</a></span></div>
+            <div class="qr-wrap"><img src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAQ4AAAEOAQAAAABQysQIAAACm0lEQVR4nO2aQYqrRwyEvx4ZZilDDpCjyDd7V+s5Sg4Q0L80aKgs1L8nm+CBJDw3vMYLD9ZChVpVJfUM8eR8vj2LgF8h/2cISgDTtAxTVyyUAdHf65XS/R6ikNRYlGGaysAXQOWWiCAswWe5lDQQSZbYfoi+Quq4vSfjGsXHuH5w3H5eLv9JSLxn1DHK5xg/JI3rz8vlX4VcAMEF7r/lIN7/HFYfA6y4uDheK93vhXyMMYD3P26WQHD8sAyO2+cY4/py6T496pP9V+BTGSYV0b/sxgzNdUuPGo6S/gLYpohc0iyfrarlOhU2NlVY6/xduJZzcFnue+son+VzKWzboYwCJVsiengDovrKaUoLHb4jomlapamzrRpgk/l+iBJ84qr1mUpwmWYRm3Jd+ZSmdddAuXDVqU37IdLEJ0tqJy680c3q6/dK6X7z1rVDwGVJETTM1qb9+ugN4vPKxSfHuP8+LTHNcUVJD02vlu7TIwmfRUA8WEJSq9KefSSTunEsQ91BYNpWjxJLCgDLwFXQ1M2WffTFdRAF50YoTLPLtx+iBJcyWo9YRkh9A2vHW6fFbw95bYqTVL5njaS2QKZZrtOsCl8bvP0QZZRrzePLstK2wTadjyQ11/nsyaJYGJWbcp0sAXpRXAsIPapv2UcZS3189hCBT9MEILasUUbPsKfZbuO6TN2uNXooEefbBNGdtWmNlPSb0clv09p4E1vOR+dOdW0V+NozaFPvndBE523n1H3Uj0ob6tEbhCSOUcdNyf1KHbfeC7X9frV0n56vNz4wybSo+1G7DWt0Htd9jPuV+7hJ8wLluo/bq6b7j+dRo978WK569WJ/wxp9vZW3nWs9WuN5xpbzUQL8fUUMWK/3t+yj8eu/aF4+5C8ed6DKJY1KAAAAAABJRU5ErkJggg==" alt="FlixBus DC QR"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 10. NYC housesit -->
+      <div class="tl-item" style="animation-delay:0.34s">
+        <div class="tl-dot-wrap"><div class="tl-dot stay"></div></div>
+        <div class="tl-card" onclick="toggleCard(this)">
+          <div class="tl-card-header">
+            <span class="tl-type-pill pill-stay">Stay</span>
+            <span class="tl-date">25 – 31 May</span>
+          </div>
+          <div class="tl-title">New York City, NY</div>
+          <div class="tl-sub">6 nights · TrustedHousesitters</div>
+          <div class="tl-details">
+            <div class="detail-row"><span class="detail-label">Parent</span><span class="detail-value">Laura</span></div>
+            <div class="detail-row"><span class="detail-label">Address</span><span class="detail-value"><a href="https://maps.google.com/?q=156+West+120th+Street+New+York+NY+10027" target="_blank">156 W 120th St, Garden Level</a></span></div>
+            <div class="detail-row"><span class="detail-label">Dogs</span><span class="detail-value">Kate & Prudence</span></div>
+            <div class="detail-row"><span class="detail-label">Walk</span><span class="detail-value">60 mins</span></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 11. Return flight JFK→FRA -->
+      <div class="tl-item" style="animation-delay:0.37s">
+        <div class="tl-dot-wrap"><div class="tl-dot flight"></div></div>
+        <div class="tl-card" onclick="toggleCard(this)">
+          <div class="tl-card-header">
+            <span class="tl-type-pill pill-flight">Flight</span>
+            <span class="tl-date">Tue 31 May</span>
+          </div>
+          <div class="tl-title">New York → Frankfurt</div>
+          <div class="tl-sub">JFK 18:29 → FRA 08:40+1 · 8h 11m · KL6106</div>
+          <div class="tl-details">
+            <div class="detail-row"><span class="detail-label">Booking code</span><span class="detail-value" style="display:flex;align-items:center;gap:6px">XGTGX2 <button class="copy-btn" onclick="event.stopPropagation();copyText('XGTGX2',this)">copy</button></span></div>
+            <div class="detail-row"><span class="detail-label">Flight</span><span class="detail-value">KL6106 (operated by Delta)</span></div>
+            <div class="detail-row"><span class="detail-label">Aircraft</span><span class="detail-value">Airbus A330-200</span></div>
+            <div class="detail-row"><span class="detail-label">Duration</span><span class="detail-value">8h 11m</span></div>
+            <div class="detail-row"><span class="detail-label">Change fee</span><span class="detail-value">+€150.00</span></div>
+            <div class="detail-row"><span class="detail-label">Maps – JFK</span><span class="detail-value"><a href="https://maps.google.com/?q=JFK+Airport+New+York" target="_blank">Open ↗</a></span></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 12. ICE FRA→MUC -->
+      <div class="tl-item" style="animation-delay:0.40s">
+        <div class="tl-dot-wrap"><div class="tl-dot train"></div></div>
+        <div class="tl-card" onclick="toggleCard(this)">
+          <div class="tl-card-header">
+            <span class="tl-type-pill pill-train">Train</span>
+            <span class="tl-date">Mon 1 Jun</span>
+          </div>
+          <div class="tl-title">Frankfurt Airport → Munich</div>
+          <div class="tl-sub">FRA Fernbf 09:41 → München Hbf 13:12 · 3h 31m · ICE 529</div>
+          <div class="tl-details">
+            <div class="detail-row"><span class="detail-label">Train</span><span class="detail-value">ICE 529 · 2nd class</span></div>
+            <div class="detail-row"><span class="detail-label">Duration</span><span class="detail-value">3h 31m</span></div>
+            <div class="detail-row"><span class="detail-label">Price</span><span class="detail-value">€40.49</span></div>
+            <div class="detail-row"><span class="detail-label">Departs</span><span class="detail-value"><a href="https://maps.google.com/?q=Frankfurt+Airport+Fernbahnhof" target="_blank">FRA Fernbahnhof ↗</a></span></div>
+            <div class="detail-row"><span class="detail-label">Arrives</span><span class="detail-value"><a href="https://maps.google.com/?q=München+Hauptbahnhof" target="_blank">München Hbf ↗</a></span></div>
+          </div>
+        </div>
+      </div>
+
+
+    </div>
+    <div style="background:var(--surface);border:0.5px solid var(--border);border-radius:var(--r);padding:14px 16px;display:flex;justify-content:space-between;align-items:center;margin-top:10px">
+      <span style="font-size:11px;font-family:'DM Mono',monospace;color:var(--muted);text-transform:uppercase;letter-spacing:0.08em">Trip total</span>
+      <div style="text-align:right">
+        <div style="font-size:14px;font-weight:700;color:var(--green)">≈ €1,164</div>
+        <div style="font-size:10px;color:var(--muted);font-family:'DM Mono',monospace">€905.92 + $259.26 converted</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- STAYS TAB -->
+  <div class="panel" id="panel-stays">
+    <p class="section-label">Accommodations</p>
+    <div class="card-grid">
+      <div class="info-card" onclick="toggleCard(this)">
+        <div class="ic-header">
+          <div><div class="ic-city">Chicago, IL</div><div class="ic-dates">24 Apr · HI Chicago Hostel · 1 night</div></div>
+          <span class="ic-tag">Hostel</span>
+        </div>
+        <div class="ic-details">
+          <div class="detail-row"><span class="detail-label">Confirmation</span><span class="detail-value">#16263020</span></div>
+          <div class="detail-row"><span class="detail-label">Check-in</span><span class="detail-value">Fri 24 Apr · after 4pm</span></div>
+          <div class="detail-row"><span class="detail-label">Check-out</span><span class="detail-value">Sat 25 Apr · by 11am</span></div>
+          <div class="detail-row"><span class="detail-label">Room</span><span class="detail-value">Men's 10-Bed Dorm</span></div>
+          <div class="detail-row"><span class="detail-label">Total</span><span class="detail-value">$57.06</span></div>
+          <div class="detail-row"><span class="detail-label">Address</span><span class="detail-value"><a href="https://maps.google.com/?q=24+East+Ida+B+Wells+Drive+Chicago+IL+60605" target="_blank">24 E Ida B Wells Dr</a></span></div>
+        </div>
+      </div>
+
+      <div class="info-card" onclick="toggleCard(this)">
+        <div class="ic-header">
+          <div><div class="ic-city">Chicago, IL</div><div class="ic-dates">25 Apr – 05 May 2026 · 10 nights</div></div>
+          <span class="ic-tag">THS</span>
+        </div>
+        <div class="ic-details">
+          <div class="detail-row"><span class="detail-label">Parent</span><span class="detail-value">Kara</span></div>
+          <div class="detail-row"><span class="detail-label">Address</span><span class="detail-value"><a href="https://maps.google.com/?q=215+E+Chestnut+Street+Chicago+IL+60611" target="_blank">215 E Chestnut St, Apt 204</a></span></div>
+          <div class="detail-row"><span class="detail-label">Dogs</span><span class="detail-value">Apolo & Berkeley</span></div>
+          <div class="detail-row"><span class="detail-label">Walk</span><span class="detail-value">60 mins total</span></div>
+        </div>
+      </div>
+      <div class="info-card" onclick="toggleCard(this)">
+        <div class="ic-header">
+          <div><div class="ic-city">Brooklyn, NY</div><div class="ic-dates">06 – 21 May 2026 · 15 nights</div></div>
+          <span class="ic-tag">THS</span>
+        </div>
+        <div class="ic-details">
+          <div class="detail-row"><span class="detail-label">Parent</span><span class="detail-value">Jared</span></div>
+          <div class="detail-row"><span class="detail-label">Dogs</span><span class="detail-value">Bruce & Remi</span></div>
+          <div class="detail-row"><span class="detail-label">Walk</span><span class="detail-value">30 mins</span></div>
+        </div>
+      </div>
+      <div class="info-card" onclick="toggleCard(this)">
+        <div class="ic-header">
+          <div><div class="ic-city">Washington, D.C.</div><div class="ic-dates">22 – 25 May 2026 · 3 nights</div></div>
+          <span class="ic-tag">THS</span>
+        </div>
+        <div class="ic-details">
+          <div class="detail-row"><span class="detail-label">Parent</span><span class="detail-value">Lia</span></div>
+          <div class="detail-row"><span class="detail-label">Dogs</span><span class="detail-value">Bartleby & Oswald</span></div>
+          <div class="detail-row"><span class="detail-label">Cats</span><span class="detail-value">Reggie & Sammy</span></div>
+          <div class="detail-row"><span class="detail-label">Walk</span><span class="detail-value">No walk needed</span></div>
+        </div>
+      </div>
+      <div class="info-card" onclick="toggleCard(this)">
+        <div class="ic-header">
+          <div><div class="ic-city">New York City, NY</div><div class="ic-dates">25 – 31 May 2026 · 6 nights</div></div>
+          <span class="ic-tag">THS</span>
+        </div>
+        <div class="ic-details">
+          <div class="detail-row"><span class="detail-label">Parent</span><span class="detail-value">Laura</span></div>
+          <div class="detail-row"><span class="detail-label">Address</span><span class="detail-value"><a href="https://maps.google.com/?q=156+West+120th+Street+New+York+NY+10027" target="_blank">156 W 120th St, Garden Level</a></span></div>
+          <div class="detail-row"><span class="detail-label">Dogs</span><span class="detail-value">Kate & Prudence</span></div>
+          <div class="detail-row"><span class="detail-label">Walk</span><span class="detail-value">60 mins</span></div>
+        </div>
+      </div>
+    </div>
+    <div style="background:var(--surface);border:0.5px solid var(--border);border-radius:var(--r);padding:14px 16px;display:flex;justify-content:space-between;align-items:center;margin-top:10px">
+      <span style="font-size:11px;font-family:'DM Mono',monospace;color:var(--muted);text-transform:uppercase;letter-spacing:0.08em">Total accommodation</span>
+      <span style="font-size:13px;font-weight:600;color:var(--text)">$57.06 (only paid stay; THS stays unpaid)</span>
+    </div>
+  </div>
+  <!-- TRANSPORT TAB -->
+  <div class="panel" id="panel-transport">
+    <p class="section-label">Flights & ground</p>
+    <div class="card-grid">
+      <div class="info-card" onclick="toggleCard(this)">
+        <div class="ic-header">
+          <div><div class="ic-city">FRA → JFK</div><div class="ic-dates">Thu 23 Apr · KL6107 · 11:50–14:36 · 9h 46m</div></div>
+          <span class="ic-tag">✈</span>
+        </div>
+        <div class="ic-details">
+          <div class="detail-row"><span class="detail-label">Code</span><span class="detail-value" style="display:flex;align-items:center;gap:6px">XGTGX2 <button class="copy-btn" onclick="event.stopPropagation();copyText('XGTGX2',this)">copy</button></span></div>
+          <div class="detail-row"><span class="detail-label">Carrier</span><span class="detail-value">KLM / Delta A330-200</span></div>
+          <div class="detail-row"><span class="detail-label">Boarding</span><span class="detail-value">10:55</span></div>
+          <div class="detail-row"><span class="detail-label">Seat</span><span class="detail-value">33F · Class V</span></div>
+          <div class="detail-row"><span class="detail-label">Zone</span><span class="detail-value">7</span></div>
+          <div class="detail-row"><span class="detail-label">Duration</span><span class="detail-value">9h 46m</span></div>
+          <div class="detail-row"><span class="detail-label">Price</span><span class="detail-value">€573.48 (return)</span></div>
+          <div class="detail-row"><span class="detail-label">Maps</span><span class="detail-value"><a href="https://maps.google.com/?q=JFK+Airport" target="_blank">JFK ↗</a></span></div>
+          <div class="qr-wrap">
+            <img src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAM0AAADNAQAAAAAzx8nEAAACb0lEQVR4nO2YMY7jOBBFX5kGqIy+AQ3MOdrqPdKGA8htzegge5SR2hehbkBlNCD7byAHm8xuNDQwWEYCKmCh6v/iK5n4ybntfhaB3zc0mVkjOx9v73yz5hMwMztWTWOPCRrLh9jYIlmLW33h/qV2oRY7Mh1c0sj9qJGvRybrX9KvEx23j7Cfbx+h/8V3/UvI8t3892VQc533L0gDTZL8Iyj5SSt+DJKX1ljqVkNmxnU+t7D0EZvPx5vZvnZTWklFBzeVEy7xFn2SpFR9bpzN/sj3420Hc2G5WcPSV5do6KN+HFziLe5jA7DsuNcdX+gRVmi1ok2d2SXa7FRVomjKxAJEwMk/uKiYhtppKLuEaY1PwwJ+pKttWMIa9ViGVGQ9xaSEqbJh0UgX/YhTsUz0kySNoXJT9oBLIODt4JK14c+/kuVfcdd/OGVIWH6qRFMm0qqvqw00bRmAf0AsBKXSSvWdcpEfIXLikmhztwmkulPsuFyyS3yGfSyKPpXTUhkC0ZQvCSD6EZek3AG158bWlHIKgwCXCkHSlC+1tTEGyT8AjVySlJ8o9JI3JSiVNncRggTUrwbd8/O0CeQiqht2xwmXyokOP4ae5R0osnNdp+y45nvbmPbwufT4MexnrvJ1IXDDnkLoo5cGle3BDS+QqNMGGOBSabXCK7BHkqbcIW3Y00WNofKegkbAT1pjOYUNwWJ9+npubSMubQD0gKgRqkPgYkfga9sAcM3M9h6G2k6ZMtE/uIg2E2kzUXrNMPdjWCOmIWnSsEFHdd5QgqWf9ePQcfvg3hbF6qu0zAzCkABopgNzw7LWTcP+/yH5j/M3SQSpnzEoG0MAAAAASUVORK5CYII=" alt="KLM Boarding Pass QR" title="Boarding pass QR code">
+          </div>
+        </div>
+      </div>
+      <div class="info-card" onclick="toggleCard(this)">
+        <div class="ic-header">
+          <div><div class="ic-city">New York → Chicago</div><div class="ic-dates">Thu 23 Apr · FlixBus N2641 · 21:30–13:25 · 15h 55m</div></div>
+          <span class="ic-tag">🚌</span>
+        </div>
+        <div class="ic-details">
+          <div class="detail-row"><span class="detail-label">Booking</span><span class="detail-value">334 771 1876</span></div>
+          <div class="detail-row"><span class="detail-label">Seat</span><span class="detail-value">8B</span></div>
+          <div class="detail-row"><span class="detail-label">Duration</span><span class="detail-value">15h 55m</span></div>
+          <div class="detail-row"><span class="detail-label">Price</span><span class="detail-value">€77.78</span></div>
+          <div class="detail-row"><span class="detail-label">Departs</span><span class="detail-value"><a href="https://maps.google.com/?q=300+W+31st+Street+New+York" target="_blank">31st & 8th, NY ↗</a></span></div>
+          <div class="detail-row"><span class="detail-label">Arrives</span><span class="detail-value"><a href="https://maps.google.com/?q=630+W+Harrison+St+Chicago" target="_blank">Chicago Bus Station ↗</a></span></div>
+          <div class="qr-wrap">
+            <img src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAASYAAAEmAQAAAADnvwB3AAADHUlEQVR4nO2aQYrkPAyFP5cNvXRgDtBHcW42V1OOMjdwlg0Kbxay80/DD1OLhq6EMUVRFbTQQ5H19KQk/n6OxxNG8M/qO632lFIq+8qe2Ndj2Y4F2Mq+sq8ppZTWF/b+qaPeJOWOV8sdqiSTDPCqLKk3f1Xvn8cILUsOXqUONKqc5lW5ky+PcVrtqdDKvqYFqgGlGvv67X59pVVVlgU69qRfydnKC/j1FVYzHyXJvMpp6khG1Xh++XcVdYDc2/9+ALg6xkfEy4FqDh8LDseCV/t4N0mSvbD3z1nta1q29G6MBNzSAlDY2NfCdqQ71EenRVZ6tSybFbOpt6gsF39XUW9Ui7sl/ubevAoa1STdAiNOc4hyP4o+LXcASV51eYyy3MkypxHQqnk1r0Y1ye5QOyRoGseocccqIhgG18doQXL+oOWWezDYljv5Bhg7eRCbAdOrfOapOtwhH0dzEVerNJLRmRfsHTCa0yTFd46CWG1kZecOd87k5AEtd0YEadR4eIM4SuOdtKABQQAkmyl59Tg+YCuh3sDxbg5lXx2AEp96dU7OpKZE7Ebgqqg27tXLc7kH8LFQaJIdS3vrFLYCufPWKdFgvrL3z1jta+44W9lTCDhOg833nw7+fX59nVU0GhBXTZQMWmg7IRHcgcsFWwtCLvPB61qorMFiL4/x7DikLJ2a6knL74AxWJw0WCvkHmRg9M734HKzbRwKZEQ2EjPYzvUxTtk/0FXzP0YegF++PkYPFToAk6+ObivS8/pxfACFAXM8i3nHFHn82/z6Kqu4VwGyTBLVokqGDulV159b8YmjTtkqwqo+2Oz1MUq9UUftUCfPqWtWLAvcAKONGkH7pG+c7O7yd86YBeTOf7pcjJXHTJlbxFHjdZ0jcvUxNI95x/XjOPc6hmC+Rc8IlGrHMn6/sPdPnXOvYxaRNicgjZvoAJ/2OtQ59zpCW+YefDUwnsPxapImWEJMvjjGc3dj8x/9+NETHKVtcLwr0UqFajfYl4uxzlun7CmKSFT/GPTkX+tLe//EmXsdZ/84xORgAnCDuVX6t9t5C6vfQqgJ8IC5IooAAAAASUVORK5CYII=" alt="FlixBus QR" title="Scan to access ticket">
+          </div>
+        </div>
+      </div>
+      <div class="info-card" onclick="toggleCard(this)">
+        <div class="ic-header">
+          <div><div class="ic-city">ORD → LGA</div><div class="ic-dates">Wed 6 May · AA2079 · 08:55–12:11 · 3h 16m</div></div>
+          <span class="ic-tag">✈</span>
+        </div>
+        <div class="ic-details">
+          <div class="detail-row"><span class="detail-label">Booking</span><span class="detail-value" style="display:flex;align-items:center;gap:6px">0012340142179 <button class="copy-btn" onclick="event.stopPropagation();copyText('0012340142179',this)">copy</button></span></div>
+          <div class="detail-row"><span class="detail-label">Carrier</span><span class="detail-value">American Airlines</span></div>
+          <div class="detail-row"><span class="detail-label">Class</span><span class="detail-value">Economy (B)</span></div>
+          <div class="detail-row"><span class="detail-label">Duration</span><span class="detail-value">3h 16m</span></div>
+          <div class="detail-row"><span class="detail-label">Price</span><span class="detail-value">$202.20</span></div>
+          <div class="detail-row"><span class="detail-label">Departs</span><span class="detail-value"><a href="https://maps.google.com/?q=Chicago+O'Hare+Airport" target="_blank">O'Hare ↗</a></span></div>
+          <div class="detail-row"><span class="detail-label">Arrives</span><span class="detail-value"><a href="https://maps.google.com/?q=LaGuardia+Airport+New+York" target="_blank">LaGuardia ↗</a></span></div>
+        </div>
+      </div>
+      <div class="info-card" onclick="toggleCard(this)">
+        <div class="ic-header">
+          <div><div class="ic-city">JFK → FRA</div><div class="ic-dates">Tue 31 May · KL6106 · 18:29–08:40+1 · 8h 11m</div></div>
+          <span class="ic-tag">✈</span>
+        </div>
+        <div class="ic-details">
+          <div class="detail-row"><span class="detail-label">Code</span><span class="detail-value" style="display:flex;align-items:center;gap:6px">XGTGX2 <button class="copy-btn" onclick="event.stopPropagation();copyText('XGTGX2',this)">copy</button></span></div>
+          <div class="detail-row"><span class="detail-label">Carrier</span><span class="detail-value">KLM / Delta A330-200</span></div>
+          <div class="detail-row"><span class="detail-label">Duration</span><span class="detail-value">8h 11m</span></div>
+          <div class="detail-row"><span class="detail-label">Maps</span><span class="detail-value"><a href="https://maps.google.com/?q=JFK+Airport" target="_blank">JFK ↗</a></span></div>
+        </div>
+      </div>
+      <div class="info-card" onclick="toggleCard(this)">
+        <div class="ic-header">
+          <div><div class="ic-city">New York → Washington D.C.</div><div class="ic-dates">Fri 22 May · FlixBus US0670 · 02:30–08:15 · 5h 45m</div></div>
+          <span class="ic-tag">🚌</span>
+        </div>
+        <div class="ic-details">
+          <div class="detail-row"><span class="detail-label">Booking</span><span class="detail-value" style="display:flex;align-items:center;gap:6px">335 687 1749 <button class="copy-btn" onclick="event.stopPropagation();copyText('3356871749',this)">copy</button></span></div>
+          <div class="detail-row"><span class="detail-label">Seat</span><span class="detail-value">3D</span></div>
+          <div class="detail-row"><span class="detail-label">Price</span><span class="detail-value">€64.17</span></div>
+          <div class="detail-row"><span class="detail-label">Departs</span><span class="detail-value"><a href="https://maps.google.com/?q=625+8th+Ave+New+York+NY+10018" target="_blank">Port Authority ↗</a></span></div>
+          <div class="detail-row"><span class="detail-label">Arrives</span><span class="detail-value"><a href="https://maps.google.com/?q=50+Massachusetts+Ave+NE+Washington+DC" target="_blank">Union Station ↗</a></span></div>
+        </div>
+      </div>
+      <div class="info-card" onclick="toggleCard(this)">
+        <div class="ic-header">
+          <div><div class="ic-city">Washington D.C. → New York</div><div class="ic-dates">Mon 25 May · FlixBus 2601 · 08:35–12:45 · 4h 10m</div></div>
+          <span class="ic-tag">🚌</span>
+        </div>
+        <div class="ic-details">
+          <div class="detail-row"><span class="detail-label">Booking</span><span class="detail-value" style="display:flex;align-items:center;gap:6px">335 687 1749 <button class="copy-btn" onclick="event.stopPropagation();copyText('3356871749',this)">copy</button></span></div>
+          <div class="detail-row"><span class="detail-label">Seat</span><span class="detail-value">14C</span></div>
+          <div class="detail-row"><span class="detail-label">Departs</span><span class="detail-value"><a href="https://maps.google.com/?q=4550+Montgomery+Ave+Bethesda+MD+20814" target="_blank">Bethesda ↗</a></span></div>
+          <div class="detail-row"><span class="detail-label">Arrives</span><span class="detail-value"><a href="https://maps.google.com/?q=300+W+31st+Street+New+York" target="_blank">NY Midtown ↗</a></span></div>
+        </div>
+      </div>
+      <div class="info-card" onclick="toggleCard(this)">
+        <div class="ic-header">
+          <div><div class="ic-city">Frankfurt Airport → Munich</div><div class="ic-dates">Mon 1 Jun · ICE 529 · 09:41–13:12 · 3h 31m</div></div>
+          <span class="ic-tag">🚆</span>
+        </div>
+        <div class="ic-details">
+          <div class="detail-row"><span class="detail-label">Train</span><span class="detail-value">ICE 529 · 2nd class</span></div>
+          <div class="detail-row"><span class="detail-label">Duration</span><span class="detail-value">3h 31m</span></div>
+          <div class="detail-row"><span class="detail-label">Price</span><span class="detail-value">€40.49</span></div>
+          <div class="detail-row"><span class="detail-label">Departs</span><span class="detail-value"><a href="https://maps.google.com/?q=Frankfurt+Airport+Fernbahnhof" target="_blank">FRA Fernbahnhof ↗</a></span></div>
+          <div class="detail-row"><span class="detail-label">Arrives</span><span class="detail-value"><a href="https://maps.google.com/?q=München+Hauptbahnhof" target="_blank">München Hbf ↗</a></span></div>
+        </div>
+      </div>
+    </div>
+    <div style="background:var(--surface);border:0.5px solid var(--border);border-radius:var(--r);padding:14px 16px;display:flex;justify-content:space-between;align-items:center;margin-top:10px">
+      <span style="font-size:11px;font-family:'DM Mono',monospace;color:var(--muted);text-transform:uppercase;letter-spacing:0.08em">Total transport</span>
+        <div style="text-align:right">
+          <div style="font-size:13px;font-weight:600;color:var(--text)">€905.92</div>
+          <div style="font-size:11px;color:var(--muted);font-family:'DM Mono',monospace">+ $202.20</div>
+        </div>
+      </div>
+      <div style="font-size:10px;font-family:'DM Mono',monospace;color:var(--faint);margin-top:4px">Flights €573.48 · FlixBus NY→CHI €77.78 · FlixBus NY↔DC €64.17 · Change fee €150 · ICE €40.49 · AA flight $202.20</div>
+    </div>
+
+  <!-- VISA TAB -->
+  <div class="panel" id="panel-visa">
+    <p class="section-label">Travel authorizations</p>
+    <div class="card-grid">
+
+      <!-- ESTA -->
+      <div class="info-card" onclick="toggleCard(this)">
+        <div class="ic-header">
+          <div>
+            <div class="ic-city">ESTA</div>
+            <div class="ic-dates">Electronic System for Travel Authorization · USA</div>
+          </div>
+          <span class="ic-tag" style="color:var(--green);border-color:rgba(74,222,154,0.3)">✓ Approved</span>
+        </div>
+        <div class="ic-details">
+          <div class="detail-row"><span class="detail-label">Status</span><span class="detail-value" style="color:var(--green)">Authorization Approved</span></div>
+          <div class="detail-row"><span class="detail-label">Expires</span><span class="detail-value">Dec 16, 2026</span></div>
+          <div class="detail-row"><span class="detail-label">Max stay per entry</span><span class="detail-value">90 days</span></div>
+          <div class="detail-row"><span class="detail-label">This trip</span><span class="detail-value" id="visa-esta-days" style="color:var(--green)">33 Days used</span></div>
+        </div>
+      </div>
+
+      <!-- Global Entry -->
+      <div class="info-card" onclick="toggleCard(this)">
+        <div class="ic-header">
+          <div>
+            <div class="ic-city">Global Entry</div>
+            <div class="ic-dates">CBP Trusted Traveler Program · USA</div>
+          </div>
+          <span class="ic-tag" style="color:var(--blue);border-color:rgba(96,170,255,0.3)">Active</span>
+        </div>
+        <div class="ic-details">
+          <div class="detail-row"><span class="detail-label">Status</span><span class="detail-value" style="color:var(--blue)">Active</span></div>
+          <div class="detail-row"><span class="detail-label">Expires</span><span class="detail-value">Mar 2, 2030</span></div>
+          <div class="detail-row"><span class="detail-label">Known Traveler No.</span><span class="detail-value" style="display:flex;align-items:center;gap:6px;font-family:'DM Mono',monospace;letter-spacing:0.05em">161514529 <button class="copy-btn" onclick="event.stopPropagation();copyText('161514529',this)">copy</button></span></div>
+          <div class="detail-row"><span class="detail-label">Use at airport</span><span class="detail-value">Global Entry kiosk, arrivals</span></div>
+          <div class="detail-row"><span class="detail-label">TSA PreCheck</span><span class="detail-value" style="color:var(--green)">Included</span></div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+</div>
+
+<script>
+  function copyText(text, btn) {
+    navigator.clipboard.writeText(text).then(() => {
+      const orig = btn.textContent;
+      btn.textContent = 'copied ✓';
+      btn.style.color = 'var(--green)';
+      setTimeout(() => { btn.textContent = orig; btn.style.color = ''; }, 1800);
+    });
+  }
+  function showTab(name) {
+    document.querySelectorAll('.tab').forEach((t, i) => {
+      t.classList.toggle('active', ['trip','stays','transport','visa'][i] === name);
+    });
+    document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+    document.getElementById('panel-' + name).classList.add('active');
+  }
+  function toggleCard(card) {
+    const details = card.querySelector('.tl-details, .ic-details');
+    if (!details) return;
+    const open = details.classList.contains('open');
+    details.classList.toggle('open', !open);
+    card.classList.toggle('expanded', !open);
+  }
+  const entry = new Date('2026-04-23');
+  const exitDate = new Date('2026-05-31');
+  const days = Math.round((exitDate - entry) / (1000 * 60 * 60 * 24));
+  const pct = Math.min((days / 90) * 100, 100);
+  const dEl = document.getElementById('esta-days');
+  const bEl = document.getElementById('esta-bar');
+  dEl.textContent = days;
+  bEl.style.width = pct + '%';
+  if (days >= 90) { dEl.classList.add('danger'); bEl.classList.add('danger'); }
+  else if (days >= 75) { dEl.classList.add('warn'); bEl.classList.add('warn'); }
+  const visaDays = document.getElementById('visa-esta-days');
+  if (visaDays) {
+    visaDays.textContent = days + ' Days used';
+    if (days >= 90) visaDays.style.color = 'var(--red)';
+    else if (days >= 75) visaDays.style.color = 'var(--amber)';
+  }
+</script>
+</body>
+</html>

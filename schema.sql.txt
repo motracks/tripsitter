@@ -1,0 +1,63 @@
+create table trips (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid references auth.users not null,
+  name text not null,
+  destination text,
+  start_date date,
+  end_date date,
+  status text default 'upcoming', -- upcoming | active | past
+  created_at timestamptz default now()
+);
+
+create table stays (
+  id uuid primary key default gen_random_uuid(),
+  trip_id uuid references trips(id) on delete cascade,
+  type text,          -- THS, hostel, hotel, airbnb
+  city text,
+  start_date date,
+  end_date date,
+  host_name text,
+  address text,
+  pets text,
+  notes text
+);
+
+create table transport (
+  id uuid primary key default gen_random_uuid(),
+  trip_id uuid references trips(id) on delete cascade,
+  type text,           -- flight, bus, train
+  origin text,
+  destination text,
+  departure timestamptz,
+  arrival timestamptz,
+  carrier text,
+  booking_code text,
+  price numeric,
+  notes text
+);
+
+create table travel_docs (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid references auth.users not null,
+  doc_type text,        -- ESTA, Global Entry, Visa
+  country text,
+  status text,
+  expires_on date,
+  reference_number text,
+  notes text
+);
+
+-- Lock every table to its owner
+alter table trips enable row level security;
+alter table stays enable row level security;
+alter table transport enable row level security;
+alter table travel_docs enable row level security;
+
+create policy "own trips" on trips for all using (auth.uid() = user_id);
+create policy "own travel_docs" on travel_docs for all using (auth.uid() = user_id);
+create policy "own stays" on stays for all using (
+  auth.uid() = (select user_id from trips where trips.id = stays.trip_id)
+);
+create policy "own transport" on transport for all using (
+  auth.uid() = (select user_id from trips where trips.id = transport.trip_id)
+);
