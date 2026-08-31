@@ -1739,6 +1739,7 @@ function openForm(opts) {
     $('attach-parsenote').innerHTML = 'reading image' + (newFiles.length > 1 ? 's' : '') + '…';
     try {
       const { fields, raw } = await parseTicket(newFiles.slice(0, 4), attach.kind);
+      console.log('parse-ticket →', fields);
       const filled = fillFormFromParsed(fields);
       if (filled) {
         $('attach-parsenote').textContent = 'fields filled — check them before saving';
@@ -1773,15 +1774,20 @@ function openForm(opts) {
     for (const [k, val] of Object.entries(parsed)) {
       const el = $('modal').querySelector(`[data-key="${k}"]`);
       if (!el || val == null || val === '') continue;
-      // don't clobber a value the user already typed
-      if (el.value && el.value !== '—') continue;
+
+      // The purpose/type select always yields to the parser (its current
+      // value is just a default, never user input at this point).
       if (k === 'type' && el.tagName === 'SELECT') {
         const want = normParsedType(String(val).toLowerCase());
         const opt = [...el.options].find(o =>
-          o.value.toLowerCase() === want || o.text.toLowerCase().includes(want));
+          o.value.toLowerCase() === want || o.text.toLowerCase().includes(want) ||
+          o.value.toLowerCase() === String(val).toLowerCase());
         if (opt) { el.value = opt.value; any = true; el.dispatchEvent(new Event('change')); }
         continue;
       }
+
+      // For every other field: don't clobber something already filled in.
+      if (el.value && el.value !== '—') continue;
       if (el.type === 'datetime-local') el.value = new Date(val).toISOString().slice(0, 16);
       else if (el.type === 'date') el.value = String(val).slice(0, 10);
       else el.value = val;
