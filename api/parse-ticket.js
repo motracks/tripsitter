@@ -35,7 +35,7 @@ const SCHEMAS = {
 };
 
 // Tried in order; first that responds wins. Current flash-tier vision models.
-const MODELS = ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-flash-latest'];
+const MODELS = ['gemini-flash-latest', 'gemini-2.5-flash', 'gemini-2.0-flash'];
 
 async function readBody(req) {
   if (req.body && typeof req.body === 'object') return req.body;
@@ -53,7 +53,7 @@ export default async function handler(req, res) {
   if (req.method === 'GET') {
     if ('models' in (req.query || {}) && key) {
       try {
-        const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${encodeURIComponent(key)}&pageSize=100`);
+        const r = await fetch('https://generativelanguage.googleapis.com/v1beta/models?pageSize=100', { headers: { 'X-goog-api-key': key } });
         const j = await r.json();
         const names = (j.models || [])
           .filter(m => (m.supportedGenerationMethods || []).includes('generateContent'))
@@ -98,10 +98,10 @@ export default async function handler(req, res) {
 
     let lastErr = null;
     for (const model of MODELS) {
-      const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(key)}`;
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
       const gres = await fetch(url, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'X-goog-api-key': key },
         body: JSON.stringify(payload),
       });
       if (!gres.ok) {
