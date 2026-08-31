@@ -552,9 +552,62 @@ function wireCountryPicker(wrapper, onPick) {
   }, 150));
 }
 function wireAllCountryPickers(root) { root.querySelectorAll('.country-picker').forEach(w => wireCountryPicker(w)); }
-// Currency guess from a country code (rough; user overrides).
-const COUNTRY_CCY = { US: 'USD', GB: 'GBP', CH: 'CHF', CA: 'CAD', AU: 'AUD', JP: 'JPY', SE: 'SEK', NO: 'NOK', DK: 'DKK', PL: 'PLN', CZ: 'CZK' };
+// ISO country → primary currency (the EUR bloc omitted; handled as default).
+const COUNTRY_CCY = {
+  US:'USD',GB:'GBP',CH:'CHF',CA:'CAD',AU:'AUD',NZ:'NZD',JP:'JPY',CN:'CNY',HK:'HKD',SG:'SGD',
+  IN:'INR',KR:'KRW',TW:'TWD',TH:'THB',MY:'MYR',PH:'PHP',ID:'IDR',VN:'VND',LK:'LKR',NP:'NPR',
+  PK:'PKR',BD:'BDT',BR:'BRL',MX:'MXN',AR:'ARS',CL:'CLP',CO:'COP',PE:'PEN',UY:'UYU',ZA:'ZAR',
+  SE:'SEK',NO:'NOK',DK:'DKK',IS:'ISK',PL:'PLN',CZ:'CZK',HU:'HUF',RO:'RON',BG:'BGN',RS:'RSD',
+  UA:'UAH',TR:'TRY',IL:'ILS',AE:'AED',SA:'SAR',QA:'QAR',KW:'KWD',BH:'BHD',OM:'OMR',JO:'JOD',
+  LB:'LBP',EG:'EGP',MA:'MAD',TN:'TND',DZ:'DZD',KE:'KES',TZ:'TZS',UG:'UGX',RW:'RWF',ET:'ETB',
+  NG:'NGN',GH:'GHS',ZM:'ZMW',BW:'BWP',NA:'NAD',MU:'MUR',MV:'MVR',FJ:'FJD',GE:'GEL',AM:'AMD',
+  AZ:'AZN',KZ:'KZT',UZ:'UZS',MD:'MDL',AL:'ALL',MK:'MKD',BA:'BAM',RU:'RUB',
+  CI:'XOF',SN:'XOF',BJ:'XOF',BF:'XOF',ML:'XOF',TG:'XOF',NE:'XOF',
+  CM:'XAF',GA:'XAF',CG:'XAF',TD:'XAF',CF:'XAF',
+  PF:'XPF',NC:'XPF',
+};
 const currencyForCountry = (cc) => COUNTRY_CCY[cc] || 'EUR';
+
+// Currency → readable name / where it's used. Only the ones likely to appear;
+// unknown codes just show the code.
+const CCY_NAME = {
+  EUR:'Euro', USD:'US Dollar', GBP:'British Pound', CHF:'Swiss Franc', JPY:'Japanese Yen',
+  AUD:'Australian Dollar', CAD:'Canadian Dollar', NZD:'New Zealand Dollar', CNY:'Chinese Yuan',
+  HKD:'Hong Kong Dollar', SGD:'Singapore Dollar', INR:'Indian Rupee', KRW:'South Korean Won',
+  TWD:'Taiwan Dollar', THB:'Thai Baht', MYR:'Malaysian Ringgit', PHP:'Philippine Peso',
+  IDR:'Indonesian Rupiah', VND:'Vietnamese Dong', LKR:'Sri Lankan Rupee', NPR:'Nepalese Rupee',
+  PKR:'Pakistani Rupee', BDT:'Bangladeshi Taka', BRL:'Brazilian Real', MXN:'Mexican Peso',
+  ARS:'Argentine Peso', CLP:'Chilean Peso', COP:'Colombian Peso', PEN:'Peruvian Sol',
+  UYU:'Uruguayan Peso', ZAR:'South African Rand', SEK:'Swedish Krona', NOK:'Norwegian Krone',
+  DKK:'Danish Krone', ISK:'Icelandic Króna', PLN:'Polish Złoty', CZK:'Czech Koruna',
+  HUF:'Hungarian Forint', RON:'Romanian Leu', BGN:'Bulgarian Lev', RSD:'Serbian Dinar',
+  UAH:'Ukrainian Hryvnia', TRY:'Turkish Lira', ILS:'Israeli Shekel', AED:'UAE Dirham',
+  SAR:'Saudi Riyal', QAR:'Qatari Riyal', KWD:'Kuwaiti Dinar', BHD:'Bahraini Dinar',
+  OMR:'Omani Rial', JOD:'Jordanian Dinar', LBP:'Lebanese Pound', EGP:'Egyptian Pound',
+  MAD:'Moroccan Dirham', TND:'Tunisian Dinar', DZD:'Algerian Dinar', KES:'Kenyan Shilling',
+  TZS:'Tanzanian Shilling', UGX:'Ugandan Shilling', RWF:'Rwandan Franc', ETB:'Ethiopian Birr',
+  NGN:'Nigerian Naira', GHS:'Ghanaian Cedi', ZMW:'Zambian Kwacha', BWP:'Botswana Pula',
+  NAD:'Namibian Dollar', MUR:'Mauritian Rupee', MVR:'Maldivian Rufiyaa', FJD:'Fijian Dollar',
+  GEL:'Georgian Lari', AMD:'Armenian Dram', AZN:'Azerbaijani Manat', KZT:'Kazakh Tenge',
+  UZS:'Uzbek Sum', MDL:'Moldovan Leu', ALL:'Albanian Lek', MKD:'Macedonian Denar',
+  BAM:'Bosnia-Herzegovina Mark', RUB:'Russian Ruble', XOF:'West African CFA Franc',
+  XAF:'Central African CFA Franc', XPF:'CFP Franc',
+};
+const ccyLabel = (c) => `${sym(c)} ${c}${CCY_NAME[c] ? ' — ' + CCY_NAME[c] : ''}`;
+
+// Build <option>s for a currency select: the given trip's tagged-country
+// currencies first (as a group), then the rest.
+function currencyOptions(selected, tripCountryCodes = [], compact = false) {
+  const pri = [...new Set(tripCountryCodes.map(currencyForCountry))].filter(c => CURRENCIES.includes(c));
+  const rest = CURRENCIES.filter(c => !pri.includes(c));
+  const label = (c) => compact ? `${sym(c)} ${c}` : ccyLabel(c);
+  const optFor = (c) => `<option value="${c}"${c === String(selected) ? ' selected' : ''}>${esc(label(c))}</option>`;
+  let html = '';
+  if (pri.length) html += `<optgroup label="this trip">${pri.map(optFor).join('')}</optgroup><optgroup label="all currencies">`;
+  html += rest.map(optFor).join('');
+  if (pri.length) html += '</optgroup>';
+  return html;
+}
 
 // FX rates via the /api/fx proxy (browser can't reach frankfurter.app
 // directly). Cached per from|to|date for the session.
@@ -707,7 +760,7 @@ function openOnboarding(isSettings = false) {
   $('onboarding-form').querySelector('[data-key="language"]').value = p.language || 'en';
 
   $('ob-home-country').innerHTML = countryPickerHTML(p.home_country || '');
-  $('ob-currency').innerHTML = `<select data-key="base_currency">${CURRENCIES.map(c => `<option value="${c}"${c === (p.base_currency || 'EUR') ? ' selected' : ''}>${sym(c)} ${c}</option>`).join('')}</select>`;
+  $('ob-currency').innerHTML = `<select data-key="base_currency">${currencyOptions(p.base_currency || 'EUR', p.home_country ? [p.home_country] : [])}</select>`;
 
   const cits = p.citizenships && p.citizenships.length ? p.citizenships : [''];
   $('ob-citizenship-primary').innerHTML = countryPickerHTML(cits[0] || '');
@@ -725,7 +778,10 @@ function openOnboarding(isSettings = false) {
   $('ob-extra-passports').querySelectorAll('.country-picker').forEach(w => wireCountryPicker(w));
   $('ob-perms').querySelectorAll('.country-picker').forEach(w => wireCountryPicker(w));
   wireCountryPicker(homeW, (cc) => {
-    if (cc) $('ob-currency').querySelector('select').value = currencyForCountry(cc);
+    if (cc) {
+      const csel = $('ob-currency').querySelector('select');
+      csel.innerHTML = currencyOptions(currencyForCountry(cc), [cc]);
+    }
     // pre-fill the passport if it's still empty
     if (cc && !countryPickerValue(passW)) {
       passW.dataset.cc = cc;
@@ -987,10 +1043,9 @@ async function hydrateAttachments(container) {
 }
 
 // Currency-sign picker: a <select> styled as a pill. `onchange` name is a
-// global set per use-site.
+// global set per use-site. Trip-tagged currencies float to the top.
 function currencyPicker(current, handlerName, extraArg) {
-  const opts = CURRENCIES.map(c =>
-    `<option value="${c}"${c === current ? ' selected' : ''}>${sym(c)} ${c}</option>`).join('');
+  const opts = currencyOptions(current, currentTrip?.country_codes || [], true);
   return `<select class="cur-picker" onclick="event.stopPropagation()" onchange="${handlerName}(this.value${extraArg != null ? ",'" + extraArg + "'" : ''})">${opts}</select>`;
 }
 
@@ -1478,7 +1533,7 @@ function fieldInner(f, val) {
     };
     let opts;
     if (f.type === 'currency') {
-      opts = CURRENCIES.map(c => `<option value="${c}"${c === String(v) ? ' selected' : ''}>${sym(c)} ${c}</option>`).join('');
+      opts = currencyOptions(v, currentTrip?.country_codes || []);
     } else if (f.groups) {
       opts = f.groups.map(g => `<optgroup label="${esc(g.label)}">${g.options.map(opt).join('')}</optgroup>`).join('');
     } else {
