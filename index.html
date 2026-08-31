@@ -1674,31 +1674,37 @@ function openForm(opts) {
     });
   }
 
+  const runParse = async () => {
+    if (!newFiles.length) return;
+    $('attach-parsenote').classList.remove('hidden');
+    $('attach-parsenote').innerHTML = 'reading image' + (newFiles.length > 1 ? 's' : '') + '…';
+    try {
+      const { fields, raw } = await parseTicket(newFiles.slice(0, 4), attach.kind);
+      const filled = fillFormFromParsed(fields);
+      if (filled) {
+        $('attach-parsenote').textContent = 'fields filled — check them before saving';
+      } else {
+        // show what the model saw so the user can copy from it
+        $('attach-parsenote').innerHTML =
+          `couldn't map fields automatically — enter them manually` +
+          (raw ? `<br><span style="color:var(--faint)">read: ${esc(String(raw).slice(0, 200))}</span>` : '');
+      }
+    } catch (err) {
+      $('attach-parsenote').textContent = 'parsing failed (' + (err.message || 'error') + ') — enter fields manually';
+    }
+  };
+
   if (attach) {
     renderGallery();
     $('attach-trigger').onclick = () => $('attach-input').click();
     $('attach-input').onchange = async () => {
       const picked = [...$('attach-input').files];
       if (!picked.length) return;
-      const firstEver = newFiles.length === 0 && keptPaths.length === 0;
       newFiles.push(...picked);
       $('attach-input').value = '';
       renderGallery();
-
-      // Parse only the very first image added, to pre-fill the form.
-      if (firstEver) {
-        $('attach-parsenote').classList.remove('hidden');
-        $('attach-parsenote').textContent = 'reading image…';
-        try {
-          const parsed = await parseTicket(picked[0], attach.kind);
-          const filled = fillFormFromParsed(parsed);
-          $('attach-parsenote').textContent = filled
-            ? 'fields filled from image — check them before saving'
-            : 'could not read fields — enter them manually';
-        } catch (err) {
-          $('attach-parsenote').textContent = 'parsing unavailable (' + (err.message || 'error') + ') — enter fields manually';
-        }
-      }
+      // (re)parse using every newly-added image together
+      await runParse();
     };
   }
 
@@ -1708,6 +1714,15 @@ function openForm(opts) {
     for (const [k, val] of Object.entries(parsed)) {
       const el = $('modal').querySelector(`[data-key="${k}"]`);
       if (!el || val == null || val === '') continue;
+      // don't clobber a value the user already typed
+      if (el.value && el.value !== '—') continue;
+      if (k === 'type' && el.tagName === 'SELECT') {
+        // match option by value or by label, case-insensitively
+        const want = String(val).toLowerCase();
+        const opt = [...el.options].find(o => o.value.toLowerCase() === want || o.text.toLowerCase().includes(want));
+        if (opt) { el.value = opt.value; any = true; el.dispatchEvent(new Event('change')); }
+        continue;
+      }
       if (el.type === 'datetime-local') el.value = new Date(val).toISOString().slice(0, 16);
       else if (el.type === 'date') el.value = String(val).slice(0, 10);
       else el.value = val;
@@ -1761,25 +1776,53 @@ function openForm(opts) {
   };
 }
 
-// Send an image to the parse endpoint. kind = 'transport' | 'stay' | 'doc'.
-async function parseTicket(file, kind) {
-  const b64 = await new Promise((res, rej) => {
-    const r = new FileReader();
-    r.onload = () => res(String(r.result).split(',')[1]);
-    r.onerror = rej;
-    r.readAsDataURL(file);
+// Downscale an image file to at most `max` px on the long edge and re-encode
+// as JPEG — keeps a ticket readable while cutting the upload from MBs to KBs.
+function shrinkImage(file, max = 1600, quality = 0.82) {
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => {
+      const scale = Math.min(1, max / Math.max(img.width, img.height));
+      const w = Math.round(img.width * scale), h = Math.round(img.height * scale);
+      const c = document.createElement('canvas');
+      c.width = w; c.height = h;
+      c.getContext('2d').drawImage(img, 0, 0, w, h);
+      const dataUrl = c.toDataURL('image/jpeg', quality);
+      resolve({ data: dataUrl.split(',')[1], mime: 'image/jpeg' });
+    };
+    img.onerror = () => {
+      // fall back to the raw file
+      const r = new FileReader();
+      r.onload = () => resolve({ data: String(r.result).split(',')[1], mime: file.type || 'image/jpeg' });
+      r.readAsDataURL(file);
+    };
+    img.src = URL.createObjectURL(file);
   });
-  const res = await fetch('/api/parse-ticket', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ image: b64, mime: file.type, kind }),
-  });
+}
+
+// Send one or more images to the parse endpoint. kind = transport|stay|doc.
+async function parseTicket(files, kind) {
+  const list = Array.isArray(files) ? files : [files];
+  const images = await Promise.all(list.slice(0, 4).map(f => shrinkImage(f)));
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), 45000);
+  let res;
+  try {
+    res = await fetch('/api/parse-ticket', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ images, kind }),
+      signal: ctrl.signal,
+    });
+  } catch (e) {
+    throw new Error(e.name === 'AbortError' ? 'timed out' : 'network error');
+  } finally { clearTimeout(t); }
   const j = await res.json().catch(() => ({}));
   if (!res.ok) {
     const d = j.detail ? (typeof j.detail === 'string' ? j.detail : JSON.stringify(j.detail)) : '';
     throw new Error((j.error || 'parse failed') + (d ? ': ' + d.slice(0, 120) : ''));
   }
-  return j;
+  return j;   // { fields, model, raw }
 }
 
 // ---------- CRUD: entity field specs + handlers ----------

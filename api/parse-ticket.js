@@ -8,30 +8,48 @@
 // those are visible on the ticket. (Google's consumer AI Studio tier may use
 // submitted data to improve their products; a paid API tier does not.)
 
+const COMMON = `
+The image(s) may be a photo, a screenshot, or a forwarded email with the
+details buried in prose. Read everything, including body text. Be decisive:
+if a value is stated or clearly implied, extract it — do not leave a field
+blank just because it isn't in a labelled box. If several images are given,
+combine them. If there are multiple prices, pick the one that represents the
+main cost of THIS booking (ignore optional add-ons and "not included" notes).
+Dates with a written month ("September 7th 2026") → ISO. Return {} only if
+the image genuinely contains none of the requested information.`;
+
 const SCHEMAS = {
-  transport: `Extract these keys where readable (omit any you cannot read):
-  type ("flight" | "bus" | "train" | "ferry" | "car"),
-  origin (city or station, human readable),
-  destination,
-  departure (ISO 8601 datetime, local time as printed),
-  arrival (ISO 8601 datetime),
-  carrier (airline / operator, plus flight or service number),
-  booking_code (PNR / booking reference / ticket number),
-  price (number only), currency (ISO 4217 code).`,
-  stay: `Extract these keys where readable (omit any you cannot read):
-  type ("hotel" | "hostel" | "airbnb" | "retreat" | "course" | "other"),
-  city,
-  start_date (ISO date, check-in),
-  end_date (ISO date, check-out),
-  host_name (property or host name),
-  address,
-  price (number only), currency (ISO 4217 code).`,
-  doc: `Extract these keys where readable (omit any you cannot read):
-  doc_type ("ESTA" | "Visa" | "Global Entry" | "Passport" | "Vaccination" | "Insurance" | "other"),
-  country,
-  status,
-  expires_on (ISO date),
-  reference_number.`,
+  transport: `${COMMON}
+Return a JSON object with any of these keys you can determine:
+  type: one of "flight" | "bus" | "train" | "ferry" | "car"
+  origin: departure city / airport / station, human readable
+  destination: arrival city / airport / station
+  departure: ISO 8601 datetime (local time as printed; date-only is fine)
+  arrival: ISO 8601 datetime
+  carrier: airline / operator name, plus flight or service number
+  booking_code: PNR / booking reference / ticket number
+  price: number only (no currency symbol)
+  currency: ISO 4217 code (e.g. EUR, USD, INR)
+  notes: anything useful that doesn't fit above (pickup contact, luggage, etc.)`,
+  stay: `${COMMON}
+Return a JSON object with any of these keys you can determine:
+  type: one of "hotel" | "hostel" | "airbnb" | "guesthouse" | "family" | "retreat" | "course" | "work" | "sport" | "housesit" | "other"
+  city: town / city of the stay
+  start_date: ISO date (check-in / arrival / course start)
+  end_date: ISO date (check-out / departure / course end)
+  host_name: property, school, host or organiser name
+  address: full postal address if given
+  price: number only — the main cost of the stay / course (no symbol)
+  currency: ISO 4217 code
+  notes: meal times, what's included/excluded, contacts, room category, etc.`,
+  doc: `${COMMON}
+Return a JSON object with any of these keys you can determine:
+  doc_type: one of "ESTA" | "Visa" | "Global Entry" | "Passport" | "Vaccination" | "Insurance" | "other"
+  country: country the document is for
+  status: e.g. "Approved", "Active", "Pending"
+  expires_on: ISO date
+  reference_number: application / reference / policy number
+  notes: anything else useful`,
 };
 
 // Tried in order; first that responds wins. Flash-tier vision models
@@ -75,25 +93,31 @@ export default async function handler(req, res) {
   if (!key) return res.status(501).json({ error: 'parsing not configured', detail: 'GEMINI_API_KEY not set' });
 
   try {
-    const { image, mime, kind } = await readBody(req);
-    if (!image) return res.status(400).json({ error: 'bad request', detail: 'no image' });
+    const body = await readBody(req);
+    const kind = body.kind;
+    // accept a single {image,mime} or an array {images:[{data,mime}]}
+    let images = [];
+    if (Array.isArray(body.images)) images = body.images.map(i => ({ data: i.data || i.image, mime: i.mime }));
+    else if (body.image) images = [{ data: body.image, mime: body.mime }];
+    images = images.filter(i => i.data).slice(0, 4);
+    if (!images.length) return res.status(400).json({ error: 'bad request', detail: 'no image' });
     if (!SCHEMAS[kind]) return res.status(400).json({ error: 'bad request', detail: 'unknown kind: ' + kind });
 
     const sys =
-      'You extract travel logistics from a photo of a ticket, booking confirmation, ' +
-      'or travel document. Respond with ONLY a single JSON object — no prose, no code fence. ' +
+      'You extract travel logistics from photos, screenshots, or forwarded emails. ' +
+      'Respond with ONLY a single JSON object — no prose, no code fence. ' +
       'Do NOT extract passenger names, passport numbers, dates of birth, or frequent-flyer ' +
-      'numbers even if visible. If a field is unreadable, omit its key.';
+      'numbers even if visible.';
 
     const payload = {
       contents: [{
         role: 'user',
         parts: [
-          { inlineData: { mimeType: mime || 'image/jpeg', data: image } },
+          ...images.map(i => ({ inlineData: { mimeType: i.mime || 'image/jpeg', data: i.data } })),
           { text: sys + '\n\n' + SCHEMAS[kind] },
         ],
       }],
-      generationConfig: { temperature: 0, responseMimeType: 'application/json', maxOutputTokens: 1024 },
+      generationConfig: { temperature: 0, responseMimeType: 'application/json', maxOutputTokens: 2048 },
     };
 
     let lastErr = null;
@@ -119,7 +143,8 @@ export default async function handler(req, res) {
         if (m) { try { parsed = JSON.parse(m[0]); } catch {} }
       }
       if (parsed && typeof parsed === 'object') { delete parsed.name; delete parsed.passenger; }
-      return res.status(200).json(parsed || {});
+      // wrap so the client can distinguish "read nothing" from an error
+      return res.status(200).json({ fields: parsed || {}, model, raw: text.slice(0, 600) });
     }
     return res.status(502).json({ error: 'gemini error', detail: lastErr });
   } catch (err) {
