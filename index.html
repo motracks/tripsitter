@@ -662,9 +662,16 @@ async function loadProfile() {
 
 // Route after auth: onboarding if no profile / not onboarded, else overview.
 async function routeAfterAuth() {
-  const p = await loadProfile();
-  if (!p || !p.onboarded_at) openOnboarding();
-  else routeToOverview();
+  try {
+    const p = await loadProfile();
+    if (!p || !p.onboarded_at) openOnboarding();
+    else await routeToOverview();
+  } catch (err) {
+    console.error('routeAfterAuth:', err);
+    show('overview');
+    const l = $('trips-list');
+    if (l) l.innerHTML = `<p class="empty-note">Something went wrong loading your trips.<br>${esc(err.message || err)}</p>`;
+  }
 }
 
 sb.auth.onAuthStateChange((_event, session) => {
