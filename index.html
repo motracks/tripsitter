@@ -185,6 +185,13 @@
   .btn-danger { background: var(--red-dim); color: var(--red); border-color: rgba(255,95,87,0.25); }
   .btn-sm { font-size: 10px; padding: 4px 9px; font-family: 'DM Mono', monospace; font-weight: 400; }
   .add-row { display: flex; justify-content: flex-end; margin-bottom: 10px; }
+  .ov-controls { display: flex; gap: 8px; margin-bottom: 14px; align-items: center; }
+  .ov-controls input[type="search"] {
+    flex: 1; background: var(--surface); border: 0.5px solid var(--border2); border-radius: var(--r);
+    padding: 9px 12px; color: var(--text); font-family: 'DM Mono', monospace; font-size: 12px;
+  }
+  .ov-controls input[type="search"]:focus { outline: none; border-color: var(--green); }
+  .ov-controls .btn { white-space: nowrap; }
 
   .card-actions { display: flex; gap: 6px; justify-content: flex-end; margin-top: 12px; padding-top: 12px; border-top: 0.5px solid var(--border); }
 
@@ -359,7 +366,10 @@
     </div>
   </header>
   <div style="padding:0 1.25rem">
-    <div class="add-row"><button class="btn btn-green btn-sm" id="new-trip-btn">+ New trip</button></div>
+    <div class="ov-controls">
+      <input type="search" id="trip-search" placeholder="search trips, places, hosts…" autocomplete="off">
+      <button class="btn btn-green btn-sm" id="new-trip-btn">+ New trip</button>
+    </div>
     <div class="card-grid" id="trips-list"></div>
   </div>
 </div>
@@ -876,6 +886,8 @@ $('settings-btn').addEventListener('click', async () => { await loadPermissions(
 let collapsedSections = new Set();
 try { collapsedSections = new Set(JSON.parse(localStorage.getItem('ts_collapsed') || '[]')); } catch {}
 
+let overviewTrips = [], overviewCharges = {};
+
 async function routeToOverview() {
   show('overview');
   const list = $('trips-list');
@@ -884,62 +896,82 @@ async function routeToOverview() {
   $('overview-sub').textContent = user?.email || 'travel archive';
   const [tripsRes, staysRes, transportRes] = await Promise.all([
     sb.from('trips').select('*').order('start_date', { ascending: false }),
-    sb.from('stays').select('trip_id, price, currency, amount_base'),
-    sb.from('transport').select('trip_id, price, currency, amount_base'),
+    sb.from('stays').select('trip_id, city, host_name, notes, price, currency, amount_base'),
+    sb.from('transport').select('trip_id, origin, destination, carrier, notes, price, currency, amount_base'),
   ]);
   const { data: trips, error } = tripsRes;
-  const allStays = staysRes.data, allTransport = transportRes.data;
   if (error) { list.innerHTML = `<p class="empty-note">${esc(error.message)}</p>`; return; }
-  if (!trips.length) { list.innerHTML = `<p class="empty-note">No trips yet.</p>`; return; }
 
-  // Per-trip total in that trip's base currency. Uses the cached amount_base
-  // where present; otherwise falls back to the raw price (approximate until
-  // the trip is opened once and the conversions are cached).
-  const chargesByTrip = {};
-  for (const r of [...(allStays || []), ...(allTransport || [])]) {
+  overviewCharges = {};
+  for (const r of [...(staysRes.data || []), ...(transportRes.data || [])]) {
     const v = r.amount_base != null ? Number(r.amount_base) : Number(r.price);
-    chargesByTrip[r.trip_id] = (chargesByTrip[r.trip_id] || 0) + (!Number.isNaN(v) ? v : 0);
+    overviewCharges[r.trip_id] = (overviewCharges[r.trip_id] || 0) + (!Number.isNaN(v) ? v : 0);
   }
+  // build a lowercase haystack per trip for search
+  const bagByTrip = {};
+  for (const r of (staysRes.data || [])) bagByTrip[r.trip_id] = (bagByTrip[r.trip_id] || '') + ' ' + [r.city, r.host_name, r.notes].filter(Boolean).join(' ');
+  for (const r of (transportRes.data || [])) bagByTrip[r.trip_id] = (bagByTrip[r.trip_id] || '') + ' ' + [r.origin, r.destination, r.carrier, r.notes].filter(Boolean).join(' ');
 
-  const cardHTML = (t) => {
-    const base = t.base_currency || 'EUR';
-    const dates = t.start_date ? `${fmtDateY(t.start_date)} – ${fmtDateY(t.end_date)}` : '';
-    return `<div class="trip-card" data-trip="${t.id}">
-      <div class="tc-top">
-        <div>
-          <div class="tc-name">${esc(t.name)}</div>
-          ${placeTagsHTML(t.place_tags, t.destination)}
-        </div>
-        <span class="status-pill status-${esc(tripStatus(t))}">${esc(tripStatus(t))}</span>
+  overviewTrips = (trips || []).map(t => ({
+    ...t,
+    _search: [
+      t.name, t.destination,
+      ...(Array.isArray(t.place_tags) ? t.place_tags.map(p => p.label + ' ' + (COUNTRY_NAME[p.country] || '')) : []),
+      bagByTrip[t.id] || '',
+    ].join(' ').toLowerCase(),
+  }));
+
+  $('trip-search').value = '';
+  renderOverview('');
+}
+
+function tripCardHTML(t) {
+  const base = t.base_currency || 'EUR';
+  const n = nights(t.start_date, t.end_date);
+  const dates = t.start_date
+    ? `${fmtDateY(t.start_date)} – ${fmtDateY(t.end_date)}${n != null ? ` · ${n} day${n === 1 ? '' : 's'}` : ''}`
+    : '';
+  return `<div class="trip-card" data-trip="${t.id}">
+    <div class="tc-top">
+      <div>
+        <div class="tc-name">${esc(t.name)}</div>
+        ${placeTagsHTML(t.place_tags, t.destination)}
       </div>
-      <div class="tc-dates">${esc(dates)}</div>
-      <div class="tc-total">Total ${fmtMoney(chargesByTrip[t.id] || 0, base)}</div>
-    </div>`;
-  };
+      <span class="status-pill status-${esc(tripStatus(t))}">${esc(tripStatus(t))}</span>
+    </div>
+    <div class="tc-dates">${esc(dates)}</div>
+    <div class="tc-total">Total ${fmtMoney(overviewCharges[t.id] || 0, base)}</div>
+  </div>`;
+}
 
-  // Group by status; order ongoing → upcoming → done. Within a group,
-  // ongoing/upcoming soonest first, done most-recent first.
+function renderOverview(query) {
+  const list = $('trips-list');
+  const q = (query || '').trim().toLowerCase();
+  const rows = q ? overviewTrips.filter(t => t._search.includes(q)) : overviewTrips;
+
+  if (!overviewTrips.length) { list.innerHTML = '<p class="empty-note">No trips yet.</p>'; return; }
+  if (!rows.length) { list.innerHTML = `<p class="empty-note">Nothing matches “${esc(query)}”.</p>`; return; }
+
   const groups = { ongoing: [], upcoming: [], done: [] };
-  for (const t of trips) groups[tripStatus(t)]?.push(t);
+  for (const t of rows) groups[tripStatus(t)]?.push(t);
   groups.ongoing.sort((a, b) => (a.start_date || '').localeCompare(b.start_date || ''));
   groups.upcoming.sort((a, b) => (a.start_date || '').localeCompare(b.start_date || ''));
   groups.done.sort((a, b) => (b.start_date || '').localeCompare(a.start_date || ''));
 
-  const SECTIONS = [
-    ['ongoing', 'Ongoing'], ['upcoming', 'Upcoming'], ['done', 'Past'],
-  ];
+  const SECTIONS = [['ongoing', 'Ongoing'], ['upcoming', 'Upcoming'], ['done', 'Past']];
   list.innerHTML = SECTIONS.filter(([k]) => groups[k].length).map(([k, label]) => {
-    const collapsed = collapsedSections.has(k);
+    // when searching, always expand
+    const collapsed = !q && collapsedSections.has(k);
     return `<div class="trip-section" data-section="${k}">
       <button type="button" class="section-head${collapsed ? ' collapsed' : ''}">
         <span>${label} <span class="sh-count">${groups[k].length}</span></span>
         <span class="sh-caret">${collapsed ? '▸' : '▾'}</span>
       </button>
       <div class="section-body"${collapsed ? ' style="display:none"' : ''}>
-        ${groups[k].map(cardHTML).join('')}
+        ${groups[k].map(tripCardHTML).join('')}
       </div>
     </div>`;
-  }).join('') || '<p class="empty-note">No trips yet.</p>';
+  }).join('');
 
   list.querySelectorAll('.trip-card').forEach(c =>
     c.addEventListener('click', () => openTrip(c.dataset.trip)));
@@ -954,6 +986,7 @@ async function routeToOverview() {
     try { localStorage.setItem('ts_collapsed', JSON.stringify([...collapsedSections])); } catch {}
   }));
 }
+$('trip-search').addEventListener('input', (e) => renderOverview(e.target.value));
 
 // ---------- trip detail ----------
 $('back-btn').addEventListener('click', routeToOverview);
