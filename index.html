@@ -473,9 +473,18 @@ function sumMoney(rows, key) {
 const money = (n) => n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
 // ---------- currency ----------
-const CURRENCIES = ['EUR', 'USD', 'GBP', 'CHF', 'CAD', 'AUD', 'JPY', 'SEK', 'NOK', 'DKK', 'PLN', 'CZK'];
-const SYMBOL = { EUR: '€', USD: '$', GBP: '£', CHF: 'CHF', CAD: 'CA$', AUD: 'A$', JPY: '¥', SEK: 'kr', NOK: 'kr', DKK: 'kr', PLN: 'zł', CZK: 'Kč' };
-const sym = (c) => SYMBOL[c] || (c || '') + ' ';
+// Full ISO-4217 working set. The ones frankfurter.app can convert are
+// listed first (FX_SUPPORTED); the rest still store & display, they just
+// fall back to raw amounts in totals.
+const FX_SUPPORTED = ['EUR','USD','GBP','CHF','JPY','AUD','CAD','CNY','HKD','SGD','INR','KRW','BRL','MXN','ZAR','NZD','SEK','NOK','DKK','PLN','CZK','HUF','RON','BGN','TRY','ILS','THB','MYR','PHP','IDR','ISK'];
+const CURRENCIES = [...FX_SUPPORTED, 'AED','SAR','QAR','KWD','EGP','MAD','KES','NGN','GHS','TZS','VND','LKR','NPR','PKR','BDT','TWD','CLP','COP','PEN','ARS','UYU','RSD','UAH','GEL','AMD','AZN','KZT','UZS','MDL','ALL','MKD','BAM','DZD','TND','JOD','LBP','OMR','BHD','ETB','UGX','RWF','ZMW','BWP','NAD','MUR','MVR','FJD','XOF','XAF','XPF'];
+const SYMBOL = {
+  EUR:'€', USD:'$', GBP:'£', JPY:'¥', CNY:'¥', HKD:'HK$', SGD:'S$', INR:'₹', KRW:'₩', AUD:'A$',
+  CAD:'CA$', NZD:'NZ$', BRL:'R$', MXN:'MX$', ZAR:'R', CHF:'CHF', SEK:'kr', NOK:'kr', DKK:'kr',
+  PLN:'zł', CZK:'Kč', HUF:'Ft', RON:'lei', TRY:'₺', ILS:'₪', THB:'฿', MYR:'RM', PHP:'₱', IDR:'Rp',
+  ISK:'kr', AED:'د.إ', SAR:'﷼', VND:'₫', TWD:'NT$', RUB:'₽', UAH:'₴', NGN:'₦', KES:'KSh', EGP:'E£',
+};
+const sym = (c) => SYMBOL[c] || (c ? c + ' ' : '');
 const fmtMoney = (n, c) => `${sym(c)}${money(Number(n) || 0)}`;
 
 // ---------- countries ----------
@@ -1398,6 +1407,14 @@ async function renderVisa(docs, trip) {
 // A field spec: { key, label, type, options?, required?, half? }
 // types: text | number | date | datetime | textarea | select | currency
 function fieldHTML(f, val) {
+  let html = fieldInner(f, val);
+  if (f.showIf) {
+    // tag the outer .field so applyConditionalFields can show/hide it
+    html = html.replace('<div class="field"', `<div class="field" data-showif="${esc(f.showIf.field)}:${esc(f.showIf.in.join('|'))}"`);
+  }
+  return html;
+}
+function fieldInner(f, val) {
   const v = val == null ? '' : val;
   if (f.type === 'places') {
     const tags = Array.isArray(val) ? val : [];
@@ -1414,8 +1431,19 @@ function fieldHTML(f, val) {
   if (f.type === 'textarea')
     return `<div class="field"><label>${esc(f.label)}</label><textarea data-key="${f.key}">${esc(v)}</textarea></div>`;
   if (f.type === 'select' || f.type === 'currency') {
-    const opts = (f.type === 'currency' ? CURRENCIES : f.options)
-      .map(o => `<option value="${esc(o)}"${String(o) === String(v) ? ' selected' : ''}>${esc(o)}</option>`).join('');
+    const opt = (o) => {
+      const val = typeof o === 'object' ? o.value : o;
+      const lab = typeof o === 'object' ? o.label : o;
+      return `<option value="${esc(val)}"${String(val) === String(v) ? ' selected' : ''}>${esc(lab)}</option>`;
+    };
+    let opts;
+    if (f.type === 'currency') {
+      opts = CURRENCIES.map(c => `<option value="${c}"${c === String(v) ? ' selected' : ''}>${sym(c)} ${c}</option>`).join('');
+    } else if (f.groups) {
+      opts = f.groups.map(g => `<optgroup label="${esc(g.label)}">${g.options.map(opt).join('')}</optgroup>`).join('');
+    } else {
+      opts = f.options.map(opt).join('');
+    }
     return `<div class="field"><label>${esc(f.label)}</label><select data-key="${f.key}">${f.required ? '' : '<option value="">—</option>'}${opts}</select></div>`;
   }
   const inputType = f.type === 'datetime' ? 'datetime-local' : (f.type === 'date' ? 'date' : (f.type === 'number' ? 'number' : 'text'));
@@ -1553,6 +1581,19 @@ function openForm(opts) {
   $('modal').onclick = (e) => { if (e.target === $('modal')) closeModal(); };
   $('modal').querySelectorAll('.tag-input').forEach(wireTagInput);
 
+  // Conditional fields: show a [data-showif="field:v1|v2"] only when the
+  // referenced field currently holds one of those values.
+  const applyConditional = () => {
+    $('modal').querySelectorAll('[data-showif]').forEach(el => {
+      const [ref, vals] = el.dataset.showif.split(':');
+      const src = $('modal').querySelector(`[data-key="${ref}"]`);
+      const on = src && vals.split('|').includes(src.value);
+      el.style.display = on ? '' : 'none';
+    });
+  };
+  $('modal').querySelectorAll('select[data-key]').forEach(s => s.addEventListener('change', applyConditional));
+  applyConditional();
+
   const readForm = () => {
     const data = {};
     $('modal').querySelectorAll('[data-key]').forEach(el => {
@@ -1667,14 +1708,34 @@ const TRIP_FIELDS = [
   { key: 'end_date', label: 'End', type: 'date', half: true },
   { key: 'base_currency', label: 'Base currency', type: 'currency' },
 ];
+const SIT_TYPES = ['housesit', 'petsit', 'farmsit'];
+// Map legacy stay type values to the current set.
+const STAY_TYPE_ALIAS = { THS: 'housesit', ths: 'housesit', friend: 'family', hostel: 'hostel', hotel: 'hotel', airbnb: 'airbnb' };
+const normStayType = (t) => STAY_TYPE_ALIAS[t] || t || '';
 const STAY_FIELDS = [
-  { key: 'type', label: 'Type', type: 'select', options: ['THS', 'hostel', 'hotel', 'airbnb', 'friend', 'other'] },
+  { key: 'type', label: 'Purpose', type: 'select', groups: [
+    { label: 'Sitting', options: [
+      { value: 'housesit', label: 'House sit' },
+      { value: 'petsit', label: 'Pet sit' },
+      { value: 'farmsit', label: 'Farm / land sit' },
+    ] },
+    { label: 'Accommodation', options: [
+      { value: 'hotel', label: 'Hotel' }, { value: 'hostel', label: 'Hostel' },
+      { value: 'airbnb', label: 'Airbnb / rental' }, { value: 'guesthouse', label: 'Guesthouse / B&B' },
+      { value: 'family', label: 'Friends & family' },
+    ] },
+    { label: 'Programme', options: [
+      { value: 'retreat', label: 'Retreat' }, { value: 'course', label: 'Course / education' },
+      { value: 'work', label: 'Work / volunteer' }, { value: 'sport', label: 'Sports camp' },
+    ] },
+    { label: '', options: [{ value: 'other', label: 'Other' }] },
+  ] },
   { key: 'city', label: 'City', type: 'text' },
   { key: 'start_date', label: 'Check-in', type: 'date', half: true },
   { key: 'end_date', label: 'Check-out', type: 'date', half: true },
-  { key: 'host_name', label: 'Host', type: 'text' },
+  { key: 'host_name', label: 'Host / organiser', type: 'text' },
   { key: 'address', label: 'Address', type: 'text' },
-  { key: 'pets', label: 'Pets', type: 'text' },
+  { key: 'pets', label: 'Pets', type: 'text', showIf: { field: 'type', in: SIT_TYPES } },
   { key: 'price', label: 'Price', type: 'number', half: true },
   { key: 'currency', label: 'Currency', type: 'currency', half: true },
   { key: 'notes', label: 'Notes', type: 'textarea' },
@@ -1736,9 +1797,12 @@ async function tripStillExists() {
 
 function stayForm(row) {
   const editing = !!row;
+  const values = row
+    ? { ...row, type: normStayType(row.type) }
+    : { type: 'housesit', currency: currentTrip?.base_currency || 'EUR' };
   openForm({
     title: editing ? 'Edit stay' : 'Add stay', fields: STAY_FIELDS,
-    values: row || { type: 'THS', currency: currentTrip?.base_currency || 'EUR' },
+    values,
     attach: { table: 'stays', folder: currentTrip.id, rowId: row?.id, kind: 'stay', defaultKeep: false },
     onSave: async (d) => {
       if (editing) { const { error } = await sb.from('stays').update(d).eq('id', row.id); if (error) throw error; return row; }
