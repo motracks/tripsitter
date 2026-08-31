@@ -239,6 +239,17 @@
   .tag-menu button:hover { background: var(--surface2); }
   .tag-menu .muted { color: var(--muted); font-size: 10px; }
 
+  .country-picker { position: relative; display: block; }
+  .country-picker input { background: var(--surface2); border: 0.5px solid var(--border2); border-radius: 8px;
+    padding: 9px 11px; color: var(--text); font-family: 'DM Mono', monospace; font-size: 12px; width: 100%; }
+  .country-picker input:focus { outline: none; border-color: var(--green); }
+  .cp-menu { position: absolute; top: 100%; left: 0; right: 0; margin-top: 4px; background: var(--surface);
+    border: 0.5px solid var(--border2); border-radius: 8px; z-index: 20; overflow: hidden; }
+  .cp-menu button { display: block; width: 100%; text-align: left; background: none; border: 0; color: var(--text);
+    font-family: 'DM Mono', monospace; font-size: 12px; padding: 8px 10px; cursor: pointer; }
+  .cp-menu button:hover { background: var(--surface2); }
+  .perm-row .country-picker { flex: 1 1 130px; }
+
   /* PLACE PILLS on cards / header */
   .tc-places, .detail-places { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 8px; }
   .mini-pill { font-size: 10px; font-family: 'DM Mono', monospace; color: var(--muted); background: var(--surface2);
@@ -303,7 +314,7 @@
     </div>
     <div class="ob-section">
       <h3>Citizenship</h3>
-      <div class="field"><label>Primary passport</label><span id="ob-citizenship-primary"></span></div>
+      <div class="field"><label>Passport</label><span id="ob-citizenship-primary"></span></div>
       <div id="ob-extra-passports"></div>
       <button type="button" class="btn btn-ghost btn-sm" id="ob-add-passport">+ another passport</button>
     </div>
@@ -466,12 +477,57 @@ const flagEmoji = (cc) => {
   return String.fromCodePoint(A + cc.toUpperCase().charCodeAt(0) - 65, A + cc.toUpperCase().charCodeAt(1) - 65);
 };
 const countryLabel = (cc) => cc ? `${flagEmoji(cc)} ${COUNTRY_NAME[cc] || cc}` : '';
-// A <select> of all countries. `selected` is an ISO-2 or ''.
-function countrySelectHTML(selected, { blank = true, key = '' } = {}) {
-  const opts = (blank ? '<option value="">—</option>' : '') +
-    COUNTRIES.map(([cc, name]) => `<option value="${cc}"${cc === selected ? ' selected' : ''}>${flagEmoji(cc)} ${esc(name)}</option>`).join('');
-  return `<select${key ? ` data-key="${key}"` : ''}>${opts}</select>`;
+
+// A type-ahead country picker. Selected ISO-2 lives on the wrapper's
+// data-cc; read it with countryPickerValue(el). `pk` tags it for perm rows.
+let _cpid = 0;
+function countryPickerHTML(selected = '', { pk = '' } = {}) {
+  const id = 'cp' + (++_cpid);
+  const label = selected ? `${flagEmoji(selected)} ${COUNTRY_NAME[selected] || selected}` : '';
+  return `<span class="country-picker" data-cc="${esc(selected)}"${pk ? ` data-pk="${pk}"` : ''} data-cpid="${id}">
+    <input type="text" autocomplete="off" placeholder="type a country…" value="${esc(label)}">
+    <div class="cp-menu hidden"></div>
+  </span>`;
 }
+function countryPickerValue(wrapper) { return wrapper?.dataset.cc || ''; }
+function wireCountryPicker(wrapper, onPick) {
+  const input = wrapper.querySelector('input');
+  const menu = wrapper.querySelector('.cp-menu');
+  const commit = (cc, name) => {
+    wrapper.dataset.cc = cc;
+    input.value = cc ? `${flagEmoji(cc)} ${name}` : '';
+    menu.classList.add('hidden');
+    if (onPick) onPick(cc);
+  };
+  input.addEventListener('input', () => {
+    const q = input.value.trim().toLowerCase();
+    wrapper.dataset.cc = '';                     // typing clears the selection
+    if (!q) { menu.classList.add('hidden'); return; }
+    const hits = COUNTRIES.filter(([, n]) => n.toLowerCase().includes(q)).slice(0, 8);
+    if (!hits.length) { menu.classList.add('hidden'); return; }
+    menu.innerHTML = hits.map(([cc, n]) => `<button type="button" data-cc="${cc}">${flagEmoji(cc)} ${esc(n)}</button>`).join('');
+    menu.classList.remove('hidden');
+    menu.querySelectorAll('button').forEach(b =>
+      b.onclick = () => commit(b.dataset.cc, COUNTRY_NAME[b.dataset.cc]));
+  });
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      const first = menu.querySelector('button');
+      if (first) first.click();
+    }
+  });
+  input.addEventListener('blur', () => setTimeout(() => {
+    menu.classList.add('hidden');
+    // if the text doesn't resolve to the current selection, restore the label
+    if (wrapper.dataset.cc) input.value = `${flagEmoji(wrapper.dataset.cc)} ${COUNTRY_NAME[wrapper.dataset.cc]}`;
+    else if (input.value.trim()) {
+      const exact = COUNTRIES.find(([, n]) => n.toLowerCase() === input.value.trim().toLowerCase());
+      if (exact) commit(exact[0], exact[1]); else input.value = '';
+    }
+  }, 150));
+}
+function wireAllCountryPickers(root) { root.querySelectorAll('.country-picker').forEach(w => wireCountryPicker(w)); }
 // Currency guess from a country code (rough; user overrides).
 const COUNTRY_CCY = { US: 'USD', GB: 'GBP', CH: 'CHF', CA: 'CAD', AU: 'AUD', JP: 'JPY', SE: 'SEK', NO: 'NOK', DK: 'DKK', PL: 'PLN', CZ: 'CZK' };
 const currencyForCountry = (cc) => COUNTRY_CCY[cc] || 'EUR';
@@ -614,30 +670,38 @@ function openOnboarding(isSettings = false) {
   $('onboarding-form').querySelector('[data-key="home_place"]').value = p.home_place || '';
   $('onboarding-form').querySelector('[data-key="language"]').value = p.language || 'en';
 
-  $('ob-home-country').innerHTML = countrySelectHTML(p.home_country || '', { key: 'home_country' });
+  $('ob-home-country').innerHTML = countryPickerHTML(p.home_country || '');
   $('ob-currency').innerHTML = `<select data-key="base_currency">${CURRENCIES.map(c => `<option value="${c}"${c === (p.base_currency || 'EUR') ? ' selected' : ''}>${sym(c)} ${c}</option>`).join('')}</select>`;
 
   const cits = p.citizenships && p.citizenships.length ? p.citizenships : [''];
-  $('ob-citizenship-primary').innerHTML = countrySelectHTML(cits[0] || '', { blank: false });
+  $('ob-citizenship-primary').innerHTML = countryPickerHTML(cits[0] || '');
   $('ob-extra-passports').innerHTML = cits.slice(1).map(cc =>
-    `<div class="perm-row">${countrySelectHTML(cc, { blank: false })}<button type="button" class="x" onclick="this.parentElement.remove()">remove</button></div>`).join('');
-
-  // home country → default currency (only when currency untouched / matches old default)
-  $('ob-home-country').querySelector('select').onchange = (e) => {
-    const cs = $('ob-currency').querySelector('select');
-    cs.value = currencyForCountry(e.target.value);
-  };
+    `<div class="perm-row">${countryPickerHTML(cc)}<button type="button" class="x" onclick="this.parentElement.remove()">remove</button></div>`).join('');
 
   // permissions
   const perms = isSettings ? (currentPermissions || []) : [];
   $('ob-perms').innerHTML = perms.map(permRowHTML).join('');
+
+  // wire pickers (home gets a callback; wire the rest in bulk)
+  const homeW = $('ob-home-country').querySelector('.country-picker');
+  const passW = $('ob-citizenship-primary').querySelector('.country-picker');
+  wireCountryPicker(passW);
+  $('ob-extra-passports').querySelectorAll('.country-picker').forEach(w => wireCountryPicker(w));
+  $('ob-perms').querySelectorAll('.country-picker').forEach(w => wireCountryPicker(w));
+  wireCountryPicker(homeW, (cc) => {
+    if (cc) $('ob-currency').querySelector('select').value = currencyForCountry(cc);
+    // pre-fill the passport if it's still empty
+    if (cc && !countryPickerValue(passW)) {
+      passW.dataset.cc = cc;
+      passW.querySelector('input').value = `${flagEmoji(cc)} ${COUNTRY_NAME[cc]}`;
+    }
+  });
 }
 function permRowHTML(perm = {}) {
-  const country = countrySelectHTML(perm.country || '', { blank: false }).replace('<select', '<select data-pk="country"');
   return `<div class="perm-row" data-perm-id="${perm.id || ''}">
     <select data-pk="kind">${['residency', 'long-stay visa', 'settled status', 'nomad visa', 'other'].map(k => `<option${k === perm.kind ? ' selected' : ''}>${k}</option>`).join('')}</select>
-    ${country}
-    <input type="text" data-pk="label" placeholder="label" value="${esc(perm.label || '')}" style="flex:1">
+    ${countryPickerHTML(perm.country || '', { pk: 'country' })}
+    <input type="text" data-pk="label" placeholder="label" value="${esc(perm.label || '')}">
     <button type="button" class="x" onclick="this.parentElement.remove()">×</button>
   </div>`;
 }
@@ -645,10 +709,12 @@ let currentPermissions = [];
 
 $('ob-add-passport').addEventListener('click', () => {
   $('ob-extra-passports').insertAdjacentHTML('beforeend',
-    `<div class="perm-row">${countrySelectHTML('', { blank: false })}<button type="button" class="x" onclick="this.parentElement.remove()">remove</button></div>`);
+    `<div class="perm-row">${countryPickerHTML('')}<button type="button" class="x" onclick="this.parentElement.remove()">remove</button></div>`);
+  wireCountryPicker($('ob-extra-passports').lastElementChild.querySelector('.country-picker'));
 });
 $('ob-add-perm').addEventListener('click', () => {
   $('ob-perms').insertAdjacentHTML('beforeend', permRowHTML());
+  wireCountryPicker($('ob-perms').lastElementChild.querySelector('.country-picker'));
 });
 $('ob-signout').addEventListener('click', () => {
   if ($('ob-signout').textContent === 'back') routeToOverview();
@@ -662,15 +728,15 @@ $('onboarding-form').addEventListener('submit', async (e) => {
   try {
     const { data: { user } } = await sb.auth.getUser();
     const f = $('onboarding-form');
-    const primary = $('ob-citizenship-primary').querySelector('select').value;
-    if (!primary) throw new Error('Primary passport is required');
-    const extras = [...$('ob-extra-passports').querySelectorAll('select')].map(s => s.value).filter(Boolean);
+    const primary = countryPickerValue($('ob-citizenship-primary').querySelector('.country-picker'));
+    if (!primary) throw new Error('Passport country is required');
+    const extras = [...$('ob-extra-passports').querySelectorAll('.country-picker')].map(countryPickerValue).filter(Boolean);
     const citizenships = [...new Set([primary, ...extras])];
 
     const profile = {
       user_id: user.id,
       display_name: f.querySelector('[data-key="display_name"]').value.trim() || null,
-      home_country: $('ob-home-country').querySelector('select').value || null,
+      home_country: countryPickerValue($('ob-home-country').querySelector('.country-picker')) || null,
       home_place: f.querySelector('[data-key="home_place"]').value.trim() || null,
       base_currency: $('ob-currency').querySelector('select').value,
       language: f.querySelector('[data-key="language"]').value,
@@ -685,7 +751,7 @@ $('onboarding-form').addEventListener('submit', async (e) => {
       id: r.dataset.permId || undefined,
       user_id: user.id,
       kind: r.querySelector('[data-pk="kind"]').value,
-      country: r.querySelector('[data-pk="country"]').value || null,
+      country: countryPickerValue(r.querySelector('[data-pk="country"]')) || null,
       label: r.querySelector('[data-pk="label"]').value.trim() || null,
     }));
     const keepIds = rows.filter(r => r.id).map(r => r.id);
