@@ -34,8 +34,9 @@ const SCHEMAS = {
   reference_number.`,
 };
 
-// Tried in order; first that responds wins. Current flash-tier vision models.
-const MODELS = ['gemini-flash-latest', 'gemini-2.5-flash', 'gemini-2.0-flash'];
+// Tried in order; first that responds wins. Flash-tier vision models
+// confirmed available on the project's key (see GET ?models).
+const MODELS = ['gemini-2.5-flash', 'gemini-flash-latest', 'gemini-3.5-flash'];
 
 async function readBody(req) {
   if (req.body && typeof req.body === 'object') return req.body;
@@ -85,12 +86,11 @@ export default async function handler(req, res) {
       'numbers even if visible. If a field is unreadable, omit its key.';
 
     const payload = {
-      systemInstruction: { parts: [{ text: sys }] },
       contents: [{
         role: 'user',
         parts: [
-          { inline_data: { mime_type: mime || 'image/jpeg', data: image } },
-          { text: SCHEMAS[kind] },
+          { inlineData: { mimeType: mime || 'image/jpeg', data: image } },
+          { text: sys + '\n\n' + SCHEMAS[kind] },
         ],
       }],
       generationConfig: { temperature: 0, responseMimeType: 'application/json', maxOutputTokens: 1024 },
