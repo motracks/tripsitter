@@ -26,6 +26,9 @@ users manually via Authentication → Users → Add user (Auto Confirm).
   - `GEMINI_API_KEY` — an AI Studio key (aistudio.google.com). Enables the
     "upload a ticket, auto-fill the fields" feature via `/api/parse-ticket`.
     See `PRIVACY.md`.
+  - `GEONAMES_USERNAME` — a free geonames.org username with "Free Web
+    Services" enabled on the account page. Enables destination autocomplete
+    via `/api/geo-search`. Without it, destinations are free-text tags.
 
 The Supabase URL and anon key are hardcoded in `index.html` — the anon key is
 public by design; Row-Level Security is the actual protection.

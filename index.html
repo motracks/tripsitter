@@ -754,7 +754,7 @@ async function routeToOverview() {
       <div class="tc-top">
         <div>
           <div class="tc-name">${esc(t.name)}</div>
-          <div class="tc-dest">${esc(t.destination || '')}</div>
+          ${placeTagsHTML(t.place_tags, t.destination)}
         </div>
         <span class="status-pill status-${esc(st)}">${esc(st)}</span>
       </div>
@@ -816,8 +816,9 @@ async function openTrip(tripId) {
   currentDocs = docs || [];
 
   $('detail-name').textContent = trip?.name || 'Trip';
-  $('detail-sub').textContent = trip
-    ? `${(trip.destination || '').toLowerCase()} · ${fmtDate(trip.start_date)} – ${fmtDate(trip.end_date)}`.trim()
+  const dateRange = trip ? `${fmtDate(trip.start_date)} – ${fmtDate(trip.end_date)}`.trim() : '';
+  $('detail-sub').innerHTML = trip
+    ? `${placeTagsHTML(trip.place_tags, trip.destination)}<div style="margin-top:4px">${esc(dateRange)}</div>`
     : '';
 
   renderEsta(trip);
@@ -1096,6 +1097,18 @@ function renderVisa(docs, trip) {
 // types: text | number | date | datetime | textarea | select | currency
 function fieldHTML(f, val) {
   const v = val == null ? '' : val;
+  if (f.type === 'places') {
+    const tags = Array.isArray(val) ? val : [];
+    const pills = tags.map((t, i) => placePillHTML(t, i)).join('');
+    return `<div class="field"><label>${esc(f.label)}</label>
+      <div class="tag-input" data-key="${f.key}" data-tags='${esc(JSON.stringify(tags))}'>
+        ${pills}
+        <input type="text" placeholder="country, city or region…" autocomplete="off">
+        <div class="tag-menu hidden"></div>
+      </div>
+      <div style="font-size:10px;font-family:'DM Mono',monospace;color:var(--faint);margin-top:4px">pick a suggestion, or press Enter for free text</div>
+    </div>`;
+  }
   if (f.type === 'textarea')
     return `<div class="field"><label>${esc(f.label)}</label><textarea data-key="${f.key}">${esc(v)}</textarea></div>`;
   if (f.type === 'select' || f.type === 'currency') {
@@ -1113,6 +1126,83 @@ function fieldHTML(f, val) {
 let modalOnClose = null;
 function closeModal() { $('modal').classList.add('hidden'); $('modal').innerHTML = ''; if (modalOnClose) { const f = modalOnClose; modalOnClose = null; f(); } }
 window.closeModal = closeModal;
+
+// ---------- place tag input ----------
+function placePillHTML(t, i) {
+  const flag = t.country ? flagEmoji(t.country) + ' ' : '';
+  return `<span class="place-pill" data-i="${i}">${flag}${esc(t.label)}<button type="button" class="x" data-remove="${i}">×</button></span>`;
+}
+// Read-only place tags for cards / headers. Falls back to the free-text
+// destination string when there are no structured tags.
+function placeTagsHTML(tags, fallback) {
+  const list = Array.isArray(tags) ? tags : [];
+  if (!list.length) return fallback ? `<div class="tc-dest">${esc(fallback)}</div>` : '';
+  const show = list.slice(0, 3).map(t =>
+    `<span class="mini-pill">${t.country ? flagEmoji(t.country) + ' ' : ''}${esc(t.label)}</span>`).join('');
+  const more = list.length > 3 ? `<span class="mini-pill">+${list.length - 3}</span>` : '';
+  return `<div class="tc-places">${show}${more}</div>`;
+}
+function tagState(container) { try { return JSON.parse(container.dataset.tags || '[]'); } catch { return []; } }
+function setTagState(container, tags) {
+  container.dataset.tags = JSON.stringify(tags);
+  const input = container.querySelector('input');
+  const menu = container.querySelector('.tag-menu');
+  container.querySelectorAll('.place-pill').forEach(p => p.remove());
+  tags.forEach((t, i) => input.insertAdjacentHTML('beforebegin', placePillHTML(t, i)));
+  container.querySelectorAll('[data-remove]').forEach(b => b.onclick = () => {
+    const next = tagState(container); next.splice(+b.dataset.remove, 1); setTagState(container, next);
+  });
+  void menu;
+}
+let geoTimer = null, geoFallbackWarned = false;
+function wireTagInput(container) {
+  const input = container.querySelector('input');
+  const menu = container.querySelector('.tag-menu');
+  setTagState(container, tagState(container)); // wire remove buttons
+
+  const addTag = (t) => {
+    const next = tagState(container);
+    next.push(t);
+    setTagState(container, next);
+    input.value = '';
+    menu.classList.add('hidden');
+    input.focus();
+  };
+
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      const val = input.value.trim();
+      if (val) addTag({ label: val, kind: 'text', country: null });
+    } else if (e.key === 'Backspace' && !input.value) {
+      const next = tagState(container); next.pop(); setTagState(container, next);
+    }
+  });
+
+  input.addEventListener('input', () => {
+    const q = input.value.trim();
+    clearTimeout(geoTimer);
+    if (q.length < 2) { menu.classList.add('hidden'); return; }
+    geoTimer = setTimeout(async () => {
+      try {
+        const r = await fetch('/api/geo-search?q=' + encodeURIComponent(q));
+        const j = await r.json();
+        if (j.fallback && !geoFallbackWarned) geoFallbackWarned = true;
+        if (!j.results || !j.results.length) { menu.classList.add('hidden'); return; }
+        menu.innerHTML = j.results.map((res, i) =>
+          `<button type="button" data-res="${i}">${res.country ? flagEmoji(res.country) + ' ' : ''}${esc(res.label)}${res.context ? ` <span class="muted">· ${esc(res.context)}</span>` : ''}</button>`
+        ).join('');
+        menu.classList.remove('hidden');
+        menu.querySelectorAll('[data-res]').forEach(b => b.onclick = () => {
+          const res = j.results[+b.dataset.res];
+          addTag({ label: res.label, kind: res.kind, country: res.country, admin: res.admin, geonameId: res.geonameId });
+        });
+      } catch { menu.classList.add('hidden'); }
+    }, 250);
+  });
+
+  input.addEventListener('blur', () => setTimeout(() => menu.classList.add('hidden'), 150));
+}
 
 // opts: { title, subtitle, fields, values, onSave(data), onDelete?, attach? {tripId,rowId} }
 function openForm(opts) {
@@ -1159,10 +1249,18 @@ function openForm(opts) {
     </div>`;
   $('modal').classList.remove('hidden');
   $('modal').onclick = (e) => { if (e.target === $('modal')) closeModal(); };
+  $('modal').querySelectorAll('.tag-input').forEach(wireTagInput);
 
   const readForm = () => {
     const data = {};
     $('modal').querySelectorAll('[data-key]').forEach(el => {
+      if (el.classList.contains('tag-input')) {
+        const tags = tagState(el);
+        data[el.dataset.key] = tags;                 // place_tags jsonb
+        data.country_codes = [...new Set(tags.map(t => t.country).filter(Boolean))];
+        data.destination = tags.map(t => t.label).join(' · ') || null;
+        return;
+      }
       let v = el.type === 'checkbox' ? el.checked : el.value;
       if (v === '') v = null;
       if (el.tagName === 'INPUT' && el.type === 'number' && v != null) v = Number(v);
@@ -1262,7 +1360,7 @@ async function parseTicket(file, kind) {
 // ---------- CRUD: entity field specs + handlers ----------
 const TRIP_FIELDS = [
   { key: 'name', label: 'Trip name', type: 'text', required: true },
-  { key: 'destination', label: 'Destination', type: 'text' },
+  { key: 'place_tags', label: 'Destination', type: 'places' },
   { key: 'start_date', label: 'Start', type: 'date', half: true },
   { key: 'end_date', label: 'End', type: 'date', half: true },
   { key: 'base_currency', label: 'Base currency', type: 'currency' },
@@ -1305,7 +1403,7 @@ function newTrip() {
     title: 'New trip', fields: TRIP_FIELDS, values: { base_currency: currentProfile?.base_currency || 'EUR' },
     onSave: async (d) => {
       const { data: { user } } = await sb.auth.getUser();
-      if (!d.base_currency) d.base_currency = guessCurrency(d.destination);
+      if (!d.base_currency) d.base_currency = currencyForCountry((d.country_codes || [])[0]);
       const { data, error } = await sb.from('trips').insert({ ...d, user_id: user.id }).select().single();
       if (error) throw error; return data;
     },
