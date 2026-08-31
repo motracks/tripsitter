@@ -20,11 +20,12 @@ users manually via Authentication → Users → Add user (Auto Confirm).
 ### 2. Vercel
 
 - Framework preset: **Other**. Leave Build / Output / Install commands empty.
-- The one required env var (optional — parsing is disabled without it):
-  - `ANTHROPIC_API_KEY` — enables the "upload a ticket, auto-fill the fields"
-    feature via `/api/parse-ticket`. ~cents per parse. See `PRIVACY.md`.
-- `npm install` runs automatically because `package.json` exists (only the
-  Anthropic SDK, used by the API route).
+- No dependencies, no build step — `index.html` is served static, and
+  `api/parse-ticket.js` uses only the built-in `fetch`.
+- One optional env var (parsing is disabled without it, manual entry still works):
+  - `GEMINI_API_KEY` — an AI Studio key (aistudio.google.com). Enables the
+    "upload a ticket, auto-fill the fields" feature via `/api/parse-ticket`.
+    See `PRIVACY.md`.
 
 The Supabase URL and anon key are hardcoded in `index.html` — the anon key is
 public by design; Row-Level Security is the actual protection.
@@ -34,7 +35,7 @@ public by design; Row-Level Security is the actual protection.
 | File | Purpose |
 |---|---|
 | `index.html` | The whole app — login, trips overview, tabbed trip view, CRUD |
-| `api/parse-ticket.js` | Vercel function: Claude vision → structured travel fields |
+| `api/parse-ticket.js` | Vercel function: Gemini vision → structured travel fields |
 | `schema.sql` | Full schema, RLS, storage bucket, seed data |
 | `PRIVACY.md` | What's stored, where it goes, how to erase |
 | `HouseTrip_reference.html` | The original single-trip prototype, kept for reference |

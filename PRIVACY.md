@@ -15,18 +15,18 @@ that keeps the project GDPR-conformant if it ever grows beyond one user.
 
 ## The ticket parser (`/api/parse-ticket`)
 
-- Runs as a Vercel serverless function. Needs `ANTHROPIC_API_KEY` set in Vercel
-  env vars; if unset, the feature is simply disabled (manual entry still works).
+- Runs as a Vercel serverless function. Needs `GEMINI_API_KEY` (an AI Studio
+  key) set in Vercel env vars; if unset, the feature is simply disabled and
+  manual entry still works.
 - The uploaded image is held **in memory for one request only** — never written
   to disk, never logged.
-- Sent to the Anthropic API (Claude) for field extraction. Anthropic does not
-  train on API inputs/outputs; default transient retention is 30 days for abuse
-  monitoring, then deleted. Zero-Data-Retention is available on request for the
-  API account if wanted.
+- Sent to the Google Gemini API for field extraction. Note: Google's free /
+  consumer AI Studio tier may use submitted data to improve their products; a
+  paid API tier does not. Use a paid-tier key if that matters to you.
 - The prompt asks the model to extract travel logistics **only** — route, times,
-  carrier, booking code, price, seat. It is instructed **not** to extract
-  passenger name, passport number, date of birth, or frequent-flyer number even
-  when visible.
+  carrier, booking code, price. It is instructed **not** to extract passenger
+  name, passport number, date of birth, or frequent-flyer number even when
+  visible, and the function strips any `name` / `passenger` key from the result.
 
 ## Data minimisation
 
