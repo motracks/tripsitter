@@ -542,29 +542,23 @@ function wireAllCountryPickers(root) { root.querySelectorAll('.country-picker').
 const COUNTRY_CCY = { US: 'USD', GB: 'GBP', CH: 'CHF', CA: 'CAD', AU: 'AUD', JP: 'JPY', SE: 'SEK', NO: 'NOK', DK: 'DKK', PL: 'PLN', CZ: 'CZK' };
 const currencyForCountry = (cc) => COUNTRY_CCY[cc] || 'EUR';
 
-// FX rates via frankfurter.app (ECB data, no key). Cached per from|to|date.
+// FX rates via the /api/fx proxy (browser can't reach frankfurter.app
+// directly). Cached per from|to|date for the session.
 const rateCache = new Map();
-async function fetchJSON(url, ms = 5000) {
-  const ctrl = new AbortController();
-  const t = setTimeout(() => ctrl.abort(), ms);
-  try {
-    const res = await fetch(url, { signal: ctrl.signal });
-    return res.ok ? await res.json() : null;
-  } catch { return null; }
-  finally { clearTimeout(t); }
-}
 async function getRate(from, to, date) {
   from = from || 'EUR'; to = to || 'EUR';
   if (from === to) return 1;
   const day = (date || new Date().toISOString().slice(0, 10)).slice(0, 10);
   const key = `${from}|${to}|${day}`;
   if (rateCache.has(key)) return rateCache.get(key);
-  let j = await fetchJSON(`https://api.frankfurter.app/${day}?from=${from}&to=${to}`);
-  let rate = j?.rates?.[to] ?? null;
-  if (rate == null) {
-    j = await fetchJSON(`https://api.frankfurter.app/latest?from=${from}&to=${to}`);
-    rate = j?.rates?.[to] ?? null;
-  }
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), 8000);
+  let rate = null;
+  try {
+    const res = await fetch(`/api/fx?from=${from}&to=${to}&date=${day}`, { signal: ctrl.signal });
+    if (res.ok) rate = (await res.json())?.rate ?? null;
+  } catch { /* leave null */ }
+  finally { clearTimeout(t); }
   if (rate != null) rateCache.set(key, rate);
   return rate;
 }
