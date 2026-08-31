@@ -150,6 +150,14 @@
   .total-bar.total-expand:hover { border-color: var(--border2); }
   .tb-breakdown { width: 100%; margin-top: 12px; padding-top: 12px; border-top: 0.5px solid var(--border); }
 
+  .cur-picker {
+    background: var(--surface2); color: var(--muted); border: 0.5px solid var(--border2);
+    border-radius: 6px; padding: 2px 4px; font-family: 'DM Mono', monospace; font-size: 10px;
+    cursor: pointer; -webkit-appearance: none; appearance: none;
+  }
+  .cur-picker:hover { color: var(--text); border-color: var(--green); }
+  .tb-value .cur-picker { font-size: 11px; vertical-align: middle; margin-left: 6px; }
+
   .section-label { font-size: 10px; font-family: 'DM Mono', monospace; color: var(--faint); text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 10px; margin-top: 0.5rem; }
   .empty-note { font-size: 12px; font-family: 'DM Mono', monospace; color: var(--faint); text-align: center; padding: 2rem 0; }
 
@@ -301,6 +309,73 @@ function sumMoney(rows, key) {
   return total;
 }
 const money = (n) => n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+// ---------- currency ----------
+const CURRENCIES = ['EUR', 'USD', 'GBP', 'CHF', 'CAD', 'AUD', 'JPY', 'SEK', 'NOK', 'DKK', 'PLN', 'CZK'];
+const SYMBOL = { EUR: '€', USD: '$', GBP: '£', CHF: 'CHF', CAD: 'CA$', AUD: 'A$', JPY: '¥', SEK: 'kr', NOK: 'kr', DKK: 'kr', PLN: 'zł', CZK: 'Kč' };
+const sym = (c) => SYMBOL[c] || (c || '') + ' ';
+const fmtMoney = (n, c) => `${sym(c)}${money(Number(n) || 0)}`;
+
+// FX rates via frankfurter.app (ECB data, no key). Cached per from|to|date.
+const rateCache = new Map();
+async function getRate(from, to, date) {
+  from = from || 'EUR'; to = to || 'EUR';
+  if (from === to) return 1;
+  const day = (date || new Date().toISOString().slice(0, 10)).slice(0, 10);
+  const key = `${from}|${to}|${day}`;
+  if (rateCache.has(key)) return rateCache.get(key);
+  let rate = null;
+  try {
+    const res = await fetch(`https://api.frankfurter.app/${day}?from=${from}&to=${to}`);
+    if (res.ok) { const j = await res.json(); rate = j?.rates?.[to] ?? null; }
+  } catch (_) { /* offline — fall through */ }
+  if (rate == null) {
+    // last resort: try latest
+    try {
+      const res = await fetch(`https://api.frankfurter.app/latest?from=${from}&to=${to}`);
+      if (res.ok) { const j = await res.json(); rate = j?.rates?.[to] ?? null; }
+    } catch (_) {}
+  }
+  if (rate != null) rateCache.set(key, rate);
+  return rate;
+}
+
+// Ensure a stay/transport row has amount_base in the trip's base currency,
+// converted at the rate for the day it was entered. Writes the cache back to
+// the DB when it computes something new. Mutates `row` in place.
+async function ensureBase(table, row, baseCurrency) {
+  const cur = row.currency || 'EUR';
+  const price = Number(row.price);
+  if (row.price == null || Number.isNaN(price)) { row.amount_base = null; return; }
+  if (price === 0) { row.amount_base = 0; return; }
+  const day = (row.created_at || new Date().toISOString()).slice(0, 10);
+  const fresh = row.amount_base != null
+    && row.base_rate_date === day
+    && row._base_for === baseCurrency + '|' + cur;
+  if (fresh) return;
+
+  if (cur === baseCurrency) {
+    row.amount_base = price;
+  } else {
+    const rate = await getRate(cur, baseCurrency, day);
+    if (rate == null) { row.amount_base = row.amount_base ?? null; return; }
+    row.amount_base = Math.round(price * rate * 100) / 100;
+  }
+  row.base_rate_date = day;
+  row._base_for = baseCurrency + '|' + cur;
+  await sb.from(table).update({ amount_base: row.amount_base, base_rate_date: day }).eq('id', row.id);
+}
+
+// Convert every row, then return base-currency subtotals.
+async function convertAndSum(stays, transport, baseCurrency) {
+  await Promise.all([
+    ...stays.map(r => ensureBase('stays', r, baseCurrency)),
+    ...transport.map(r => ensureBase('transport', r, baseCurrency)),
+  ]);
+  const sum = (rows) => rows.reduce((a, r) => a + (Number(r.amount_base) || 0), 0);
+  const staysTotal = sum(stays), transportTotal = sum(transport);
+  return { staysTotal, transportTotal, total: staysTotal + transportTotal };
+}
 window.copyText = function (text, btn) {
   navigator.clipboard.writeText(text).then(() => {
     const orig = btn.textContent;
@@ -356,22 +431,25 @@ async function routeToOverview() {
   $('overview-sub').textContent = user?.email || 'travel archive';
   const [{ data: trips, error }, { data: allStays }, { data: allTransport }] = await Promise.all([
     sb.from('trips').select('*').order('start_date', { ascending: false }),
-    sb.from('stays').select('trip_id, price'),
-    sb.from('transport').select('trip_id, price'),
+    sb.from('stays').select('trip_id, price, currency, amount_base'),
+    sb.from('transport').select('trip_id, price, currency, amount_base'),
   ]);
   const list = $('trips-list');
   if (error) { list.innerHTML = `<p class="empty-note">${esc(error.message)}</p>`; return; }
   if (!trips.length) { list.innerHTML = `<p class="empty-note">No trips yet.</p>`; return; }
 
-  // Sum every charge per trip_id.
+  // Per-trip total in that trip's base currency. Uses the cached amount_base
+  // where present; otherwise falls back to the raw price (approximate until
+  // the trip is opened once and the conversions are cached).
   const chargesByTrip = {};
   for (const r of [...(allStays || []), ...(allTransport || [])]) {
-    const v = Number(r.price);
-    chargesByTrip[r.trip_id] = (chargesByTrip[r.trip_id] || 0) + (r.price != null && !Number.isNaN(v) ? v : 0);
+    const v = r.amount_base != null ? Number(r.amount_base) : Number(r.price);
+    chargesByTrip[r.trip_id] = (chargesByTrip[r.trip_id] || 0) + (!Number.isNaN(v) ? v : 0);
   }
 
   list.innerHTML = trips.map(t => {
     const st = tripStatus(t);
+    const base = t.base_currency || 'EUR';
     const dates = t.start_date
       ? `${fmtDateY(t.start_date)} – ${fmtDateY(t.end_date)}`
       : '';
@@ -384,7 +462,7 @@ async function routeToOverview() {
         <span class="status-pill status-${esc(st)}">${esc(st)}</span>
       </div>
       <div class="tc-dates">${esc(dates)}</div>
-      <div class="tc-total">Total ${money(chargesByTrip[t.id] || 0)}</div>
+      <div class="tc-total">Total ${fmtMoney(chargesByTrip[t.id] || 0, base)}</div>
     </div>`;
   }).join('');
   list.querySelectorAll('.trip-card').forEach(c =>
@@ -402,9 +480,22 @@ document.querySelectorAll('.tab').forEach(tab => {
   });
 });
 
+// Guess a trip's base currency from its destination when unset.
+function guessCurrency(destination) {
+  const d = (destination || '').toLowerCase();
+  if (/\b(usa|united states|u\.s|america|new york|nyc|chicago|los angeles)\b/.test(d)) return 'USD';
+  if (/\b(uk|united kingdom|england|london|scotland)\b/.test(d)) return 'GBP';
+  if (/\b(switzerland|swiss|zurich|geneva)\b/.test(d)) return 'CHF';
+  if (/\b(canada|toronto|vancouver)\b/.test(d)) return 'CAD';
+  if (/\b(australia|sydney|melbourne)\b/.test(d)) return 'AUD';
+  if (/\b(japan|tokyo)\b/.test(d)) return 'JPY';
+  return 'EUR';
+}
+
+let currentTrip = null, currentStays = [], currentTransport = [];
+
 async function openTrip(tripId) {
   show('detail');
-  // reset panels to Trip tab
   document.querySelectorAll('.tab').forEach((t, i) => t.classList.toggle('active', i === 0));
   document.querySelectorAll('#detail .panel').forEach((p, i) => p.classList.toggle('active', i === 0));
 
@@ -414,10 +505,17 @@ async function openTrip(tripId) {
     sb.from('transport').select('*').eq('trip_id', tripId).order('departure', { ascending: true }),
     sb.auth.getUser(),
   ]);
-  const { data: docs } = await sb
-    .from('travel_docs')
-    .select('*')
-    .eq('user_id', user.user.id);
+  const { data: docs } = await sb.from('travel_docs').select('*').eq('user_id', user.user.id);
+
+  // Set base currency if the trip has none yet.
+  if (trip && !trip.base_currency) {
+    trip.base_currency = guessCurrency(trip.destination);
+    sb.from('trips').update({ base_currency: trip.base_currency }).eq('id', trip.id);
+  }
+
+  currentTrip = trip;
+  currentStays = stays || [];
+  currentTransport = transport || [];
 
   $('detail-name').textContent = trip?.name || 'Trip';
   $('detail-sub').textContent = trip
@@ -425,46 +523,67 @@ async function openTrip(tripId) {
     : '';
 
   renderEsta(trip);
-  renderTimeline(stays || [], transport || []);
-  renderStays(stays || []);
-  renderTransport(transport || []);
+  renderTimeline(currentStays, currentTransport);
+  renderStays(currentStays);
+  renderTransport(currentTransport);
   renderVisa(docs || [], trip);
-  renderTotals(stays || [], transport || []);
+  refreshTotals();
 }
 
-// Sum of every charge on a trip: stays + transport price columns.
-function tripCharges(stays, transport) {
-  const staysTotal = sumMoney(stays, 'price');
-  const transportTotal = sumMoney(transport, 'price');
-  return { staysTotal, transportTotal, total: staysTotal + transportTotal };
+// Currency-sign picker: a <select> styled as a pill. `onchange` name is a
+// global set per use-site.
+function currencyPicker(current, handlerName, extraArg) {
+  const opts = CURRENCIES.map(c =>
+    `<option value="${c}"${c === current ? ' selected' : ''}>${sym(c)} ${c}</option>`).join('');
+  return `<select class="cur-picker" onclick="event.stopPropagation()" onchange="${handlerName}(this.value${extraArg != null ? ",'" + extraArg + "'" : ''})">${opts}</select>`;
 }
 
-// A plain always-on total bar (Stays / Transport tabs).
-function totalBar(id, label, total) {
-  $(id).innerHTML = `<div class="total-bar">
-    <span class="tb-label">${esc(label)}</span>
-    <div class="tb-value">${money(total)}</div>
+// Recompute + paint all three total bars for the current trip.
+async function refreshTotals() {
+  const base = currentTrip?.base_currency || 'EUR';
+  $('trip-total').innerHTML = `<div class="total-bar"><span class="tb-label">Trip total</span><div class="tb-value">…</div></div>`;
+  const c = await convertAndSum(currentStays, currentTransport, base);
+
+  $('transport-total').innerHTML = `<div class="total-bar">
+    <span class="tb-label">Total transport</span>
+    <div class="tb-value">${fmtMoney(c.transportTotal, base)}</div>
   </div>`;
-}
-
-// Trip tab: value only, breakdown revealed on click.
-function tripTotalBar(id, charges) {
-  $(id).innerHTML = `<div class="total-bar total-expand" onclick="toggleCard(this)">
+  $('stays-total').innerHTML = `<div class="total-bar">
+    <span class="tb-label">Total stays</span>
+    <div class="tb-value">${fmtMoney(c.staysTotal, base)}</div>
+  </div>`;
+  $('trip-total').innerHTML = `<div class="total-bar total-expand" onclick="toggleCard(this)">
     <span class="tb-label">Trip total</span>
-    <div class="tb-value">${money(charges.total)}</div>
+    <div class="tb-value">${fmtMoney(c.total, base)} ${currencyPicker(base, 'setTripCurrency')}</div>
     <div class="tb-breakdown ic-details">
-      <div class="detail-row"><span class="detail-label">Transport</span><span class="detail-value">${money(charges.transportTotal)}</span></div>
-      <div class="detail-row"><span class="detail-label">Stays</span><span class="detail-value">${money(charges.staysTotal)}</span></div>
+      <div class="detail-row"><span class="detail-label">Transport</span><span class="detail-value">${fmtMoney(c.transportTotal, base)}</span></div>
+      <div class="detail-row"><span class="detail-label">Stays</span><span class="detail-value">${fmtMoney(c.staysTotal, base)}</span></div>
+      <div class="detail-row"><span class="detail-label">Note</span><span class="detail-value">converted at the rate on each entry's date</span></div>
     </div>
   </div>`;
 }
 
-function renderTotals(stays, transport) {
-  const c = tripCharges(stays, transport);
-  totalBar('transport-total', 'Total transport', c.transportTotal);
-  totalBar('stays-total', 'Total stays', c.staysTotal);
-  tripTotalBar('trip-total', c);
+window.setTripCurrency = async function (cur) {
+  if (!currentTrip || cur === currentTrip.base_currency) return;
+  currentTrip.base_currency = cur;
+  await sb.from('trips').update({ base_currency: cur }).eq('id', currentTrip.id);
+  await refreshTotals();
+};
+
+// Change one row's own currency, then re-render that tab + totals.
+async function setRowCurrency(table, id, rows, rerender, cur) {
+  const row = rows.find(r => r.id === id);
+  if (!row || cur === row.currency) return;
+  row.currency = cur;
+  row.amount_base = null; row.base_rate_date = null; row._base_for = null;
+  await sb.from(table).update({ currency: cur }).eq('id', id);
+  rerender();
+  await refreshTotals();
 }
+window.setStayCurrency = (cur, id) =>
+  setRowCurrency('stays', id, currentStays, () => renderStays(currentStays), cur);
+window.setTransportCurrency = (cur, id) =>
+  setRowCurrency('transport', id, currentTransport, () => renderTransport(currentTransport), cur);
 
 function renderEsta(trip) {
   const d = $('esta-days'), b = $('esta-bar');
@@ -501,7 +620,7 @@ function renderTimeline(stays, transport) {
         t.booking_code && `<div class="detail-row"><span class="detail-label">Booking</span><span class="detail-value" style="display:flex;align-items:center;gap:6px">${esc(t.booking_code)} <button class="copy-btn" onclick="event.stopPropagation();copyText('${esc(String(t.booking_code).replace(/\s/g,''))}',this)">copy</button></span></div>`,
         t.carrier && `<div class="detail-row"><span class="detail-label">Carrier</span><span class="detail-value">${esc(t.carrier)}</span></div>`,
         t.arrival && `<div class="detail-row"><span class="detail-label">Arrives</span><span class="detail-value">${esc(fmtDT(t.arrival))}</span></div>`,
-        t.price != null && `<div class="detail-row"><span class="detail-label">Price</span><span class="detail-value">${esc(t.price)}</span></div>`,
+        t.price != null && `<div class="detail-row"><span class="detail-label">Price</span><span class="detail-value">${Number(t.price) === 0 ? 'free' : fmtMoney(t.price, t.currency)}</span></div>`,
         t.notes && `<div class="detail-row"><span class="detail-label">Notes</span><span class="detail-value">${esc(t.notes)}</span></div>`,
       ].filter(Boolean).join('');
       tl.insertAdjacentHTML('beforeend', `
@@ -524,6 +643,7 @@ function renderTimeline(stays, transport) {
         s.host_name && `<div class="detail-row"><span class="detail-label">Host</span><span class="detail-value">${esc(s.host_name)}</span></div>`,
         s.address && `<div class="detail-row"><span class="detail-label">Address</span><span class="detail-value"><a href="https://maps.google.com/?q=${encodeURIComponent(s.address)}" target="_blank">${esc(s.address)} ↗</a></span></div>`,
         s.pets && `<div class="detail-row"><span class="detail-label">Pets</span><span class="detail-value">${esc(s.pets)}</span></div>`,
+        s.price != null && `<div class="detail-row"><span class="detail-label">Price</span><span class="detail-value">${Number(s.price) === 0 ? 'unpaid' : fmtMoney(s.price, s.currency)}</span></div>`,
         s.notes && `<div class="detail-row"><span class="detail-label">Notes</span><span class="detail-value">${esc(s.notes)}</span></div>`,
       ].filter(Boolean).join('');
       tl.insertAdjacentHTML('beforeend', `
@@ -553,7 +673,7 @@ function renderStays(stays) {
       `<div class="detail-row"><span class="detail-label">Dates</span><span class="detail-value">${esc(fmtDateY(s.start_date))} – ${esc(fmtDateY(s.end_date))}</span></div>`,
       s.address && `<div class="detail-row"><span class="detail-label">Address</span><span class="detail-value"><a href="https://maps.google.com/?q=${encodeURIComponent(s.address)}" target="_blank">${esc(s.address)} ↗</a></span></div>`,
       s.pets && `<div class="detail-row"><span class="detail-label">Pets</span><span class="detail-value">${esc(s.pets)}</span></div>`,
-      s.price != null && `<div class="detail-row"><span class="detail-label">Price</span><span class="detail-value">${Number(s.price) === 0 ? 'unpaid' : money(Number(s.price))}</span></div>`,
+      s.price != null && `<div class="detail-row"><span class="detail-label">Price</span><span class="detail-value" style="display:flex;align-items:center;gap:8px">${Number(s.price) === 0 ? 'unpaid' : money(Number(s.price))} ${currencyPicker(s.currency || 'EUR', 'setStayCurrency', s.id)}</span></div>`,
       s.notes && `<div class="detail-row"><span class="detail-label">Notes</span><span class="detail-value">${esc(s.notes)}</span></div>`,
     ].filter(Boolean).join('');
     return `<div class="info-card" onclick="toggleCard(this)">
@@ -576,7 +696,7 @@ function renderTransport(transport) {
       t.carrier && `<div class="detail-row"><span class="detail-label">Carrier</span><span class="detail-value">${esc(t.carrier)}</span></div>`,
       `<div class="detail-row"><span class="detail-label">Departs</span><span class="detail-value">${esc(fmtDT(t.departure))}</span></div>`,
       t.arrival && `<div class="detail-row"><span class="detail-label">Arrives</span><span class="detail-value">${esc(fmtDT(t.arrival))}</span></div>`,
-      t.price != null && `<div class="detail-row"><span class="detail-label">Price</span><span class="detail-value">${esc(t.price)}</span></div>`,
+      t.price != null && `<div class="detail-row"><span class="detail-label">Price</span><span class="detail-value" style="display:flex;align-items:center;gap:8px">${Number(t.price) === 0 ? 'free' : money(Number(t.price))} ${currencyPicker(t.currency || 'EUR', 'setTransportCurrency', t.id)}</span></div>`,
       t.notes && `<div class="detail-row"><span class="detail-label">Notes</span><span class="detail-value">${esc(t.notes)}</span></div>`,
     ].filter(Boolean).join('');
     return `<div class="info-card" onclick="toggleCard(this)">
