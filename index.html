@@ -347,14 +347,7 @@
       <p id="detail-sub"></p>
     </div>
     <div class="header-right">
-      <div class="esta-badge" id="esta-badge">
-        <div style="display:flex;align-items:baseline;gap:4px">
-          <div class="esta-days" id="esta-days">–</div>
-          <div class="esta-unit">Days</div>
-        </div>
-        <div class="esta-label">/ 90 days esta</div>
-        <div class="esta-bar-wrap"><div class="esta-bar" id="esta-bar" style="width:0%"></div></div>
-      </div>
+      <div class="esta-badge" id="visa-header" style="max-width:150px"></div>
     </div>
   </header>
 
@@ -821,7 +814,7 @@ async function openTrip(tripId) {
     ? `${placeTagsHTML(trip.place_tags, trip.destination)}<div style="margin-top:4px">${esc(dateRange)}</div>`
     : '';
 
-  renderEsta(trip);
+  renderVisaHeader(trip);
   renderTimeline(currentStays, currentTransport);
   renderStays(currentStays);
   renderTransport(currentTransport);
@@ -904,16 +897,82 @@ window.setStayCurrency = (cur, id) =>
 window.setTransportCurrency = (cur, id) =>
   setRowCurrency('transport', id, currentTransport, () => renderTransport(currentTransport), cur);
 
-function renderEsta(trip) {
-  const d = $('esta-days'), b = $('esta-bar');
-  d.className = 'esta-days'; b.className = 'esta-bar';
-  const days = nights(trip?.start_date, trip?.end_date);
-  if (days == null) { d.textContent = '–'; b.style.width = '0%'; return; }
-  d.textContent = days;
-  const pct = Math.min((days / 90) * 100, 100);
-  b.style.width = pct + '%';
-  if (days >= 90) { d.classList.add('danger'); b.classList.add('danger'); }
-  else if (days >= 75) { d.classList.add('warn'); b.classList.add('warn'); }
+// ---------- visa ----------
+let visaData = null, visaMeta = null;
+async function loadVisaData() {
+  if (visaData) return visaData;
+  try {
+    const [d, m] = await Promise.all([
+      fetch('/data/passport-index.json').then(r => r.json()),
+      fetch('/data/passport-index.meta.json').then(r => r.json()).catch(() => null),
+    ]);
+    visaData = d; visaMeta = m;
+  } catch { visaData = {}; }
+  return visaData;
+}
+
+// Rank: lower = more favourable.
+const VISA_RANK = { 'visa free': 0, 'visa on arrival': 1, 'eta': 2, 'e-visa': 3, 'visa required': 4, 'no admission': 5 };
+const VISA_LABEL = {
+  'visa free': 'Visa-free', 'visa on arrival': 'Visa on arrival', 'eta': 'ETA / ESTA required',
+  'e-visa': 'e-Visa required', 'visa required': 'Visa required', 'no admission': 'No admission',
+};
+const VISA_TONE = { 'visa free': 'green', 'visa on arrival': 'green', 'eta': 'amber', 'e-visa': 'amber', 'visa required': 'red', 'no admission': 'red' };
+
+// Best requirement for one destination across the traveller's passports,
+// with a residency/long-stay permission overriding to "resident".
+function computeVisa(destCC) {
+  if (!destCC || !visaData) return null;
+  const cits = (currentProfile?.citizenships || []).filter(Boolean);
+  const perm = (currentPermissions || []).find(p => p.country === destCC);
+  if (perm) return { status: 'resident', label: `${perm.label || perm.kind}`, tone: 'green', days: null, viaPermission: true };
+
+  let best = null;
+  for (const c of cits) {
+    if (c === destCC) { best = { status: 'visa free', days: null, passport: c }; break; }
+    const rule = visaData[c]?.[destCC];
+    if (!rule) continue;
+    const status = typeof rule === 'object' ? rule.status : String(rule);
+    const days = typeof rule === 'object' ? (rule.days ?? null) : (/^\d+$/.test(String(rule)) ? +rule : null);
+    if (!best || VISA_RANK[status] < VISA_RANK[best.status]) best = { status, days, passport: c };
+  }
+  if (!best) return null;
+  return {
+    status: best.status,
+    label: VISA_LABEL[best.status] || best.status,
+    tone: VISA_TONE[best.status] || 'grey',
+    days: best.days,
+    passport: best.passport,
+  };
+}
+
+async function renderVisaHeader(trip) {
+  await loadVisaData();
+  const el = $('visa-header');
+  const ccs = (trip?.country_codes || []);
+  const tripDays = nights(trip?.start_date, trip?.end_date);
+  if (!ccs.length || !(currentProfile?.citizenships || []).length) {
+    el.innerHTML = `<div class="esta-label" style="text-align:right">visa — set citizenship &amp; destination</div>`;
+    return;
+  }
+  // worst (most restrictive) rule across destination countries
+  let worst = null;
+  for (const cc of ccs) {
+    const v = computeVisa(cc);
+    if (v && v.status !== 'resident' && (!worst || VISA_RANK[v.status] > VISA_RANK[worst.status])) worst = { ...v, cc };
+  }
+  if (!worst) { el.innerHTML = `<div class="esta-label" style="text-align:right">no visa needed</div>`; return; }
+
+  let bar = '';
+  if (worst.days != null && tripDays != null) {
+    const pct = Math.min((tripDays / worst.days) * 100, 100);
+    const tone = tripDays >= worst.days ? 'red' : (tripDays >= worst.days * 0.8 ? 'amber' : 'green');
+    bar = `<div class="esta-bar-wrap"><div class="esta-bar ${tone === 'red' ? 'danger' : tone === 'amber' ? 'warn' : ''}" style="width:${pct}%"></div></div>
+           <div class="esta-label" style="text-align:right">${tripDays} / ${worst.days} days</div>`;
+  }
+  el.innerHTML = `<span class="visa-badge vb-${worst.tone}">${esc(worst.label)}</span>
+    <div class="esta-label" style="text-align:right;margin-top:3px">${flagEmoji(worst.cc)} ${esc(COUNTRY_NAME[worst.cc] || worst.cc)}</div>
+    ${bar}`;
 }
 
 const dotClass = (type) => ({ flight: 'flight', bus: 'bus', train: 'train' }[type] || 'stay');
@@ -1066,11 +1125,51 @@ function renderTransport(transport) {
   hydrateAttachments($('transport-list'));
 }
 
-function renderVisa(docs, trip) {
+async function renderVisa(docs, trip) {
+  await loadVisaData();
   const el = $('visa-list');
-  if (!docs.length) { el.innerHTML = '<p class="empty-note">No travel documents.</p>'; return; }
-  const days = nights(trip?.start_date, trip?.end_date);
-  el.innerHTML = docs.map(d => {
+  const tripDays = nights(trip?.start_date, trip?.end_date);
+  const ccs = trip?.country_codes || [];
+  const cits = (currentProfile?.citizenships || []).filter(Boolean);
+
+  // ── Computed guidance ──────────────────────────────────────
+  let guidance = '';
+  if (!cits.length) {
+    guidance = `<div class="visa-block"><div class="vb-line">Add your citizenship in <b>settings</b> to see entry requirements.</div></div>`;
+  } else if (!ccs.length) {
+    guidance = `<div class="visa-block"><div class="vb-line">Tag this trip's destination with a country to see visa requirements.</div></div>`;
+  } else {
+    const primary = cits[0];
+    guidance = `<div class="section-label" style="margin-top:0">Entry — travelling on ${flagEmoji(primary)} ${esc(COUNTRY_NAME[primary] || primary)}${cits.length > 1 ? ` (+${cits.length - 1})` : ''}</div>` +
+      ccs.map(cc => {
+        const v = computeVisa(cc);
+        if (!v) return `<div class="visa-block"><div class="vb-country">${flagEmoji(cc)} ${esc(COUNTRY_NAME[cc] || cc)}</div><div class="vb-line">No data for this destination — check the official government site.</div></div>`;
+        let bar = '';
+        if (v.days != null && tripDays != null) {
+          const pct = Math.min((tripDays / v.days) * 100, 100);
+          const tone = tripDays >= v.days ? 'vb-red' : (tripDays >= v.days * 0.8 ? 'vb-amber' : 'vb-green');
+          const barColor = tone === 'vb-red' ? 'var(--red)' : tone === 'vb-amber' ? 'var(--amber)' : 'var(--green)';
+          bar = `<div class="vb-line">Max visa-free stay: <b>${v.days} days</b></div>
+            <div class="vb-line">This trip: ${tripDays} days
+              <div class="vb-bar-wrap"><div class="vb-bar" style="width:${pct}%;background:${barColor}"></div></div>
+              ${tripDays >= v.days ? '<b style="color:var(--red)">exceeds the visa-free limit</b>' : tripDays >= v.days * 0.8 ? '<span style="color:var(--amber)">close to the limit</span>' : 'well within'}
+            </div>`;
+        }
+        const action = { 'eta': 'Apply for the ETA / ESTA before departure.', 'e-visa': 'Apply for the e-Visa before departure.', 'visa required': 'Apply for a visa at the consulate before travel.', 'no admission': 'Entry may not be permitted — check official guidance.' }[v.status];
+        return `<div class="visa-block">
+          <div class="vb-country">${flagEmoji(cc)} ${esc(COUNTRY_NAME[cc] || cc)}
+            <span class="visa-badge vb-${v.tone}">${esc(v.label)}</span></div>
+          ${v.viaPermission ? `<div class="vb-line">You hold: ${esc(v.label)} — visa rules may not apply.</div>` : ''}
+          ${bar}
+          ${action ? `<div class="vb-line">⚠ ${esc(action)}</div>` : ''}
+          <div class="vb-line"><a href="https://www.google.com/search?q=${encodeURIComponent((COUNTRY_NAME[cc] || cc) + ' visa requirements for ' + (COUNTRY_NAME[primary] || primary) + ' citizens official')}" target="_blank">official requirements ↗</a></div>
+        </div>`;
+      }).join('');
+  }
+
+  // ── Your documents (existing travel_docs CRUD) ─────────────
+  const docsHTML = docs.length ? docs.map(d => {
+    const days = tripDays;
     const rows = [
       d.status && `<div class="detail-row"><span class="detail-label">Status</span><span class="detail-value">${esc(d.status)}</span></div>`,
       d.expires_on && `<div class="detail-row"><span class="detail-label">Expires</span><span class="detail-value">${esc(fmtDateY(d.expires_on))}</span></div>`,
@@ -1088,7 +1187,18 @@ function renderVisa(docs, trip) {
         <div class="card-actions"><button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();docForm(currentDocs.find(x=>x.id==='${d.id}'))">edit</button></div>
       </div>
     </div>`;
-  }).join('');
+  }).join('') : '<p class="empty-note">No documents saved.</p>';
+
+  const asOf = visaMeta?.fetched_on ? ` (data as of ${visaMeta.fetched_on})` : '';
+  el.innerHTML = `
+    ${guidance}
+    <div class="visa-disclaimer">
+      Guidance only, from a community-maintained dataset${esc(asOf)}. Visa rules change —
+      always confirm entry requirements on the destination's official government website
+      before you book or travel.
+    </div>
+    <p class="section-label" style="margin-top:1.5rem">Your documents</p>
+    ${docsHTML}`;
   hydrateAttachments($('visa-list'));
 }
 
