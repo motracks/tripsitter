@@ -8,8 +8,6 @@
 // those are visible on the ticket. (Google's consumer AI Studio tier may use
 // submitted data to improve their products; a paid API tier does not.)
 
-export const config = { api: { bodyParser: { sizeLimit: '10mb' } } };
-
 const SCHEMAS = {
   transport: `Extract these keys where readable (omit any you cannot read):
   type ("flight" | "bus" | "train" | "ferry" | "car"),
@@ -48,8 +46,19 @@ async function readBody(req) {
 }
 
 export default async function handler(req, res) {
+  // GET → debug: report which env vars are visible (never the values)
+  if (req.method === 'GET') {
+    const seen = Object.keys(process.env).filter(k => /GEMINI|GOOGLE|GENAI|AI_?STUDIO/i.test(k));
+    return res.status(200).json({
+      ok: true,
+      has_GEMINI_API_KEY: !!process.env.GEMINI_API_KEY,
+      has_GOOGLE_API_KEY: !!process.env.GOOGLE_API_KEY,
+      matching_env_var_names: seen,
+      total_env_vars: Object.keys(process.env).length,
+    });
+  }
   if (req.method !== 'POST') return res.status(405).json({ error: 'method not allowed' });
-  const key = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY;
+  const key = (process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || '').trim();
   if (!key) return res.status(501).json({ error: 'parsing not configured', detail: 'GEMINI_API_KEY not set' });
 
   try {
