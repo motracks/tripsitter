@@ -1322,7 +1322,7 @@ function renderTimeline(stays, transport) {
             <div class="tl-title">${esc(t.origin || '')} → ${esc(t.destination || '')}</div>
             <div class="tl-sub">${esc(t.carrier || '')}</div>
             <div class="tl-details">${rows || '<div class="detail-row"><span class="detail-label">No extra detail</span><span class="detail-value"></span></div>'}
-              <div class="card-actions"><button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();transportForm(currentTransport.find(x=>x.id==='${t.id}'))">edit</button></div>
+              <div class="card-actions"><button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();editTransport('${t.id}')">edit</button></div>
             </div>
           </div>
         </div>`);
@@ -1348,7 +1348,7 @@ function renderTimeline(stays, transport) {
             <div class="tl-title">${esc(s.city || '')}</div>
             <div class="tl-sub">${n != null ? n + ' night' + (n === 1 ? '' : 's') : ''}${s.host_name ? ' · ' + esc(s.host_name) : ''}</div>
             <div class="tl-details">${rows || '<div class="detail-row"><span class="detail-label">No extra detail</span><span class="detail-value"></span></div>'}
-              <div class="card-actions"><button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();stayForm(currentStays.find(x=>x.id==='${s.id}'))">edit</button></div>
+              <div class="card-actions"><button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();editStay('${s.id}')">edit</button></div>
             </div>
           </div>
         </div>`);
@@ -1377,7 +1377,7 @@ function renderStays(stays) {
         <span class="ic-tag">${esc(s.type || 'stay')}</span>
       </div>
       <div class="ic-details">${rows}
-        <div class="card-actions"><button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();stayForm(currentStays.find(x=>x.id==='${s.id}'))">edit</button></div>
+        <div class="card-actions"><button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();editStay('${s.id}')">edit</button></div>
       </div>
     </div>`;
   }).join('');
@@ -1404,7 +1404,7 @@ function renderTransport(transport) {
         <span class="ic-tag">${icon((t.type || '').toLowerCase())}</span>
       </div>
       <div class="ic-details">${rows}
-        <div class="card-actions"><button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();transportForm(currentTransport.find(x=>x.id==='${t.id}'))">edit</button></div>
+        <div class="card-actions"><button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();editTransport('${t.id}')">edit</button></div>
       </div>
     </div>`;
   }).join('');
@@ -1480,7 +1480,7 @@ async function renderVisa(docs, trip) {
         <span class="ic-tag">${esc(d.status || '')}</span>
       </div>
       <div class="ic-details">${rows}
-        <div class="card-actions"><button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();docForm(currentDocs.find(x=>x.id==='${d.id}'))">edit</button></div>
+        <div class="card-actions"><button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();editDoc('${d.id}')">edit</button></div>
       </div>
     </div>`;
   }).join('') : '<p class="empty-note">No documents saved.</p>';
@@ -1648,9 +1648,13 @@ function openForm(opts) {
   const attachBlock = attach ? `
     <div class="field">
       <label>Tickets / QR codes / documents</label>
-      <div class="attach-box" id="attach-trigger">add image(s) — the first one auto-fills the fields</div>
+      <div class="attach-box" id="attach-trigger">add image(s) — fields auto-fill from the first</div>
       <input type="file" id="attach-input" accept="image/*" multiple class="hidden">
       <div class="attach-gallery" id="attach-gallery"></div>
+      <label style="flex-direction:row;gap:6px;align-items:center;margin-top:8px;text-transform:none">
+        <input type="checkbox" id="attach-keep" style="width:auto" ${attach.defaultKeep ? 'checked' : ''}>
+        keep the image${attach.defaultKeep ? '' : '(s)'} in the app after reading
+      </label>
       <div class="parse-note hidden" id="attach-parsenote"></div>
     </div>` : '';
 
@@ -1772,9 +1776,9 @@ function openForm(opts) {
       // don't clobber a value the user already typed
       if (el.value && el.value !== '—') continue;
       if (k === 'type' && el.tagName === 'SELECT') {
-        // match option by value or by label, case-insensitively
-        const want = String(val).toLowerCase();
-        const opt = [...el.options].find(o => o.value.toLowerCase() === want || o.text.toLowerCase().includes(want));
+        const want = normParsedType(String(val).toLowerCase());
+        const opt = [...el.options].find(o =>
+          o.value.toLowerCase() === want || o.text.toLowerCase().includes(want));
         if (opt) { el.value = opt.value; any = true; el.dispatchEvent(new Event('change')); }
         continue;
       }
@@ -1793,8 +1797,9 @@ function openForm(opts) {
     $('modal-msg').textContent = '';
     try {
       const data = readForm();
+      const keep = attach ? !!$('attach-keep')?.checked : false;
       if (attach) {
-        data.attachment_paths = keptPaths.slice();   // will append uploads below
+        data.attachment_paths = keep ? keptPaths.slice() : [];
         delete data.attachment_path;                 // legacy single column
       }
       const saved = await onSave(data);
@@ -1806,13 +1811,17 @@ function openForm(opts) {
           folder = `user/${user.id}`;
         }
         const uploaded = [];
-        for (const f of newFiles) {
-          const path = `${folder}/${rowId}/${Date.now()}_${Math.random().toString(36).slice(2, 7)}_${f.name.replace(/[^\w.-]/g, '_')}`;
-          const up = await sb.storage.from('tickets').upload(path, f, { upsert: true });
-          if (!up.error) uploaded.push(path);
+        if (keep) {
+          for (const f of newFiles) {
+            const path = `${folder}/${rowId}/${Date.now()}_${Math.random().toString(36).slice(2, 7)}_${f.name.replace(/[^\w.-]/g, '_')}`;
+            const up = await sb.storage.from('tickets').upload(path, f, { upsert: true });
+            if (!up.error) uploaded.push(path);
+          }
         }
-        if (removedPaths.length) await sb.storage.from('tickets').remove(removedPaths);
-        const finalPaths = [...keptPaths, ...uploaded];
+        // remove: rows the user deleted, plus — if 'keep' is off — every kept path
+        const toRemove = keep ? removedPaths : [...removedPaths, ...keptPaths];
+        if (toRemove.length) await sb.storage.from('tickets').remove(toRemove);
+        const finalPaths = keep ? [...keptPaths, ...uploaded] : [];
         await sb.from(attach.table).update({ attachment_paths: finalPaths }).eq('id', rowId);
       }
       closeModal();
@@ -1892,6 +1901,20 @@ const SIT_TYPES = ['housesit', 'petsit', 'farmsit'];
 // Map legacy stay type values to the current set.
 const STAY_TYPE_ALIAS = { THS: 'housesit', ths: 'housesit', friend: 'family', hostel: 'hostel', hotel: 'hotel', airbnb: 'airbnb' };
 const normStayType = (t) => STAY_TYPE_ALIAS[t] || t || '';
+// Map free-ish purpose phrasings from the parser onto a select value.
+function normParsedType(s) {
+  if (/teacher training|\bttc\b|\bcourse\b|training|workshop|certification|programme|program|study|semester|class/.test(s)) return 'course';
+  if (/retreat|meditation|wellness|ashram|silent/.test(s)) return 'retreat';
+  if (/house ?sit|pet ?sit|farm ?sit|\bsit\b|trustedhousesitters|\bths\b/.test(s)) return 'housesit';
+  if (/volunteer|work exchange|wwoof|workaway|helpx|internship/.test(s)) return 'work';
+  if (/camp|surf|climb|dive|dives|diving|training camp|academy/.test(s)) return 'sport';
+  if (/hostel/.test(s)) return 'hostel';
+  if (/hotel|resort|inn\b/.test(s)) return 'hotel';
+  if (/airbnb|apartment|rental|flat\b/.test(s)) return 'airbnb';
+  if (/guest ?house|\bb&b\b|bed and breakfast|homestay|pension/.test(s)) return 'guesthouse';
+  if (/friend|family|relative|parents/.test(s)) return 'family';
+  return s;
+}
 const STAY_FIELDS = [
   { key: 'type', label: 'Purpose', type: 'select', groups: [
     { label: 'Sitting', options: [
@@ -1983,7 +2006,7 @@ function stayForm(row) {
   openForm({
     title: editing ? 'Edit stay' : 'Add stay', fields: STAY_FIELDS,
     values,
-    attach: { table: 'stays', folder: currentTrip.id, rowId: row?.id, kind: 'stay' },
+    attach: { table: 'stays', folder: currentTrip.id, rowId: row?.id, kind: 'stay', defaultKeep: false },
     onSave: async (d) => {
       if (editing) { const { error } = await sb.from('stays').update(d).eq('id', row.id); if (error) throw error; return row; }
       const { data, error } = await sb.from('stays').insert({ ...d, trip_id: currentTrip.id }).select().single();
@@ -2001,7 +2024,7 @@ function transportForm(row) {
   openForm({
     title: editing ? 'Edit transport' : 'Add transport', fields: TRANSPORT_FIELDS,
     values: row || { type: 'flight', currency: currentTrip?.base_currency || 'EUR' },
-    attach: { table: 'transport', folder: currentTrip.id, rowId: row?.id, kind: 'transport' },
+    attach: { table: 'transport', folder: currentTrip.id, rowId: row?.id, kind: 'transport', defaultKeep: true },
     onSave: async (d) => {
       if (editing) { const { error } = await sb.from('transport').update(d).eq('id', row.id); if (error) throw error; return row; }
       const { data, error } = await sb.from('transport').insert({ ...d, trip_id: currentTrip.id }).select().single();
@@ -2019,7 +2042,7 @@ function docForm(row) {
   openForm({
     title: editing ? 'Edit document' : 'Add document', fields: DOC_FIELDS,
     values: row || {},
-    attach: { table: 'travel_docs', folder: 'user', rowId: row?.id, kind: 'doc', userFolder: true },
+    attach: { table: 'travel_docs', folder: 'user', rowId: row?.id, kind: 'doc', userFolder: true, defaultKeep: false },
     onSave: async (d) => {
       const { data: { user } } = await sb.auth.getUser();
       if (editing) { const { error } = await sb.from('travel_docs').update(d).eq('id', row.id); if (error) throw error; return row; }
@@ -2034,6 +2057,10 @@ function docForm(row) {
   });
 }
 window.stayForm = stayForm; window.transportForm = transportForm; window.docForm = docForm;
+// Edit handlers called from inline onclick — look the row up here (module scope).
+window.editStay = (id) => stayForm(currentStays.find(x => x.id === id));
+window.editTransport = (id) => transportForm(currentTransport.find(x => x.id === id));
+window.editDoc = (id) => docForm(currentDocs.find(x => x.id === id));
 
 // ---------- boot ----------
 $('new-trip-btn').addEventListener('click', newTrip);

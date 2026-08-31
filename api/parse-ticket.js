@@ -33,7 +33,18 @@ Return a JSON object with any of these keys you can determine:
   notes: anything useful that doesn't fit above (pickup contact, luggage, etc.)`,
   stay: `${COMMON}
 Return a JSON object with any of these keys you can determine:
-  type: one of "hotel" | "hostel" | "airbnb" | "guesthouse" | "family" | "retreat" | "course" | "work" | "sport" | "housesit" | "other"
+  type: the purpose of the stay — exactly one of:
+        "hotel", "hostel", "airbnb" (short-term rental), "guesthouse" (B&B / homestay),
+        "family" (staying with friends or relatives),
+        "retreat" (yoga / meditation / wellness retreat),
+        "course" (a training, teacher training, workshop, or study programme — e.g. a
+                  yoga teacher training, a language course, a diving certification),
+        "work" (volunteering, work exchange, WWOOF, an internship),
+        "sport" (a training camp — surf, climbing, football, etc.),
+        "housesit" (looking after a home and/or pets while the owner is away),
+        "other".
+        Infer it from the sender and the wording: a "School of Yoga" sending a "Teacher
+        Training Course" welcome letter → "course".
   city: town / city of the stay
   start_date: ISO date (check-in / arrival / course start)
   end_date: ISO date (check-out / departure / course end)
