@@ -1720,7 +1720,8 @@ function fieldInner(f, val) {
   let iv = v;
   if (f.type === 'datetime' && v) iv = new Date(v).toISOString().slice(0, 16);
   if (f.type === 'date' && v) iv = String(v).slice(0, 10);
-  return `<div class="field"><label>${esc(f.label)}</label><input type="${inputType}"${f.type === 'number' ? ' step="0.01"' : ''} data-key="${f.key}" value="${esc(iv)}"></div>`;
+  const hintEl = f.airportHint ? `<div class="airport-hint" data-hint-for="${f.key}" style="font-size:10px;font-family:'DM Mono',monospace;color:var(--faint);margin-top:4px"></div>` : '';
+  return `<div class="field"><label>${esc(f.label)}</label><input type="${inputType}"${f.type === 'number' ? ' step="0.01"' : ''} data-key="${f.key}" value="${esc(iv)}">${hintEl}</div>`;
 }
 
 let modalOnClose = null;
@@ -1866,6 +1867,33 @@ function openForm(opts) {
   };
   $('modal').querySelectorAll('select[data-key]').forEach(s => s.addEventListener('change', applyConditional));
   applyConditional();
+
+  // Airport hints: for flight transport, echo the resolved airport name/city
+  // under the From/To fields so a bare IATA code is legible. No network — just
+  // the bundled airport table.
+  const hintEls = $('modal').querySelectorAll('.airport-hint');
+  if (hintEls.length) {
+    const typeEl = $('modal').querySelector('[data-key="type"]');
+    const updateHints = async () => {
+      const isFlight = typeEl && typeEl.value === 'flight';
+      if (!isFlight) { hintEls.forEach(h => { h.textContent = ''; }); return; }
+      const table = await loadAirports();
+      hintEls.forEach(h => {
+        const inp = $('modal').querySelector(`[data-key="${h.dataset.hintFor}"]`);
+        const code = extractIATA(inp && inp.value);
+        const a = code && table[code];
+        h.textContent = a
+          ? `✈ ${a.name}${a.city ? ' · ' + a.city : ''}${a.country ? ', ' + a.country : ''}`
+          : (code ? `no airport found for “${code}”` : '');
+      });
+    };
+    hintEls.forEach(h => {
+      const inp = $('modal').querySelector(`[data-key="${h.dataset.hintFor}"]`);
+      if (inp) inp.addEventListener('input', updateHints);
+    });
+    if (typeEl) typeEl.addEventListener('change', updateHints);
+    updateHints();
+  }
 
   const readForm = () => {
     const data = {};
@@ -2126,8 +2154,8 @@ const STAY_FIELDS = [
 ];
 const TRANSPORT_FIELDS = [
   { key: 'type', label: 'Type', type: 'select', options: ['flight', 'bus', 'train', 'ferry', 'car', 'other'] },
-  { key: 'origin', label: 'From', type: 'text', half: true },
-  { key: 'destination', label: 'To', type: 'text', half: true },
+  { key: 'origin', label: 'From', type: 'text', half: true, airportHint: true },
+  { key: 'destination', label: 'To', type: 'text', half: true, airportHint: true },
   { key: 'departure', label: 'Departs', type: 'datetime', half: true },
   { key: 'arrival', label: 'Arrives', type: 'datetime', half: true },
   { key: 'carrier', label: 'Carrier', type: 'text' },
