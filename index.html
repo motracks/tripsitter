@@ -207,6 +207,57 @@
   .attach-thumb { max-width: 140px; border-radius: 8px; background: #fff; padding: 4px; margin-top: 4px; }
   .parse-note { font-size: 10px; color: var(--amber); font-family: 'DM Mono', monospace; margin-top: 6px; }
 
+  /* ONBOARDING / SETTINGS */
+  #onboarding { max-width: 460px; margin: 8vh auto 0; padding: 0 1.25rem 3rem; }
+  #onboarding h1 { font-size: 28px; font-weight: 700; letter-spacing: -0.01em; }
+  #onboarding .ob-sub { font-size: 12px; color: var(--muted); font-family: 'DM Mono', monospace; margin-top: 4px; margin-bottom: 1.5rem; }
+  .ob-section { border-top: 0.5px solid var(--border); padding: 16px 0 4px; }
+  .ob-section:first-of-type { border-top: 0; }
+  .ob-section h3 { font-size: 10px; font-family: 'DM Mono', monospace; color: var(--faint); text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 12px; }
+  .perm-row { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-bottom: 8px; }
+  .perm-row select, .perm-row input { font-size: 11px; padding: 7px 8px; max-width: 100%; min-width: 0; }
+  .perm-row select { flex: 1 1 130px; }
+  .perm-row input { flex: 2 1 140px; }
+  .perm-row .x { background: none; border: 0; color: var(--muted); cursor: pointer; font-family: 'DM Mono', monospace; flex: 0 0 auto; }
+  .settings-btn { background: none; border: 0.5px solid var(--border2); color: var(--muted); border-radius: 99px;
+    padding: 4px 10px; font-family: 'DM Mono', monospace; font-size: 10px; cursor: pointer; }
+
+  /* TAG INPUT */
+  .tag-input { background: var(--surface2); border: 0.5px solid var(--border2); border-radius: 8px;
+    padding: 6px; display: flex; flex-wrap: wrap; gap: 5px; align-items: center; position: relative; }
+  .tag-input:focus-within { border-color: var(--green); }
+  .tag-input input { background: none; border: 0; color: var(--text); font-family: 'DM Mono', monospace;
+    font-size: 12px; padding: 4px; flex: 1; min-width: 80px; }
+  .tag-input input:focus { outline: none; }
+  .place-pill { display: inline-flex; align-items: center; gap: 5px; background: var(--surface); border: 0.5px solid var(--border2);
+    border-radius: 99px; padding: 3px 4px 3px 8px; font-size: 11px; font-family: 'DM Mono', monospace; }
+  .place-pill .x { background: none; border: 0; color: var(--muted); cursor: pointer; font-size: 12px; line-height: 1; padding: 0 3px; }
+  .tag-menu { position: absolute; top: 100%; left: 0; right: 0; margin-top: 4px; background: var(--surface);
+    border: 0.5px solid var(--border2); border-radius: 8px; z-index: 10; overflow: hidden; }
+  .tag-menu button { display: block; width: 100%; text-align: left; background: none; border: 0; color: var(--text);
+    font-family: 'DM Mono', monospace; font-size: 12px; padding: 8px 10px; cursor: pointer; }
+  .tag-menu button:hover { background: var(--surface2); }
+  .tag-menu .muted { color: var(--muted); font-size: 10px; }
+
+  /* PLACE PILLS on cards / header */
+  .tc-places, .detail-places { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 8px; }
+  .mini-pill { font-size: 10px; font-family: 'DM Mono', monospace; color: var(--muted); background: var(--surface2);
+    border: 0.5px solid var(--border); border-radius: 99px; padding: 2px 7px; }
+
+  /* VISA PANEL */
+  .visa-block { background: var(--surface); border: 0.5px solid var(--border); border-radius: var(--r); padding: 14px 16px; margin-bottom: 10px; }
+  .visa-block .vb-country { font-size: 15px; font-weight: 700; display: flex; align-items: center; gap: 8px; }
+  .visa-badge { font-size: 10px; font-family: 'DM Mono', monospace; padding: 3px 9px; border-radius: 99px; text-transform: uppercase; letter-spacing: 0.05em; }
+  .vb-green { background: var(--green-dim); color: var(--green); }
+  .vb-amber { background: var(--amber-dim); color: var(--amber); }
+  .vb-red { background: var(--red-dim); color: var(--red); }
+  .vb-grey { background: var(--faint); color: var(--muted); }
+  .visa-block .vb-line { font-size: 12px; color: var(--muted); margin-top: 8px; }
+  .visa-block .vb-bar-wrap { height: 4px; background: var(--border2); border-radius: 99px; overflow: hidden; margin-top: 6px; max-width: 180px; }
+  .visa-block .vb-bar { height: 100%; border-radius: 99px; }
+  .visa-disclaimer { font-size: 10px; font-family: 'DM Mono', monospace; color: var(--faint); line-height: 1.5; margin-top: 12px; padding: 10px; border: 0.5px dashed var(--border2); border-radius: 8px; }
+  .visa-disclaimer a { color: var(--muted); }
+
   /* LAYOVER */
   .layover-connector { display: flex; align-items: center; gap: 10px; margin: -2px 0 8px 52px; animation: fadeUp 0.3s ease both; }
   .layover-line { flex: 1; height: 1px; background: var(--border2); }
@@ -229,6 +280,46 @@
   <div class="msg" id="login-msg"></div>
 </div>
 
+<!-- ONBOARDING VIEW -->
+<div id="onboarding" class="hidden">
+  <h1>Welcome</h1>
+  <p class="ob-sub" id="ob-sub">a few details to set things up</p>
+  <form id="onboarding-form">
+    <div class="ob-section">
+      <h3>You</h3>
+      <div class="field"><label>Display name</label><input type="text" data-key="display_name"></div>
+    </div>
+    <div class="ob-section">
+      <h3>Home</h3>
+      <div class="field"><label>Home country</label><span id="ob-home-country"></span></div>
+      <div class="field"><label>Home region / city <span style="text-transform:none">(optional)</span></label><input type="text" data-key="home_place" placeholder="e.g. Munich"></div>
+    </div>
+    <div class="ob-section">
+      <h3>Money &amp; language</h3>
+      <div class="field-2">
+        <div class="field"><label>Base currency</label><span id="ob-currency"></span></div>
+        <div class="field"><label>Language</label><select data-key="language"><option value="en">English</option></select></div>
+      </div>
+    </div>
+    <div class="ob-section">
+      <h3>Citizenship</h3>
+      <div class="field"><label>Primary passport</label><span id="ob-citizenship-primary"></span></div>
+      <div id="ob-extra-passports"></div>
+      <button type="button" class="btn btn-ghost btn-sm" id="ob-add-passport">+ another passport</button>
+    </div>
+    <div class="ob-section">
+      <h3>Travel permissions <span style="text-transform:none;color:var(--muted)">— residencies, long-stay visas (optional)</span></h3>
+      <div id="ob-perms"></div>
+      <button type="button" class="btn btn-ghost btn-sm" id="ob-add-perm">+ add permission</button>
+    </div>
+    <div class="modal-msg" id="ob-msg"></div>
+    <div class="modal-actions" style="margin-top:16px">
+      <button type="button" class="btn btn-ghost btn-sm" id="ob-signout">sign out</button>
+      <button type="submit" class="btn btn-green btn-sm" id="ob-save">save &amp; continue</button>
+    </div>
+  </form>
+</div>
+
 <!-- TRIPS OVERVIEW VIEW -->
 <div id="overview" class="hidden wrap">
   <header>
@@ -236,7 +327,8 @@
       <h1>Trips</h1>
       <p id="overview-sub">travel archive</p>
     </div>
-    <div class="header-right">
+    <div class="header-right" style="flex-direction:row;gap:6px">
+      <button class="settings-btn" id="settings-btn">settings</button>
       <button class="signout" id="signout-1">sign out</button>
     </div>
   </header>
@@ -319,7 +411,7 @@ const sb = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 const $ = (id) => document.getElementById(id);
 const esc = (s) => (s == null ? '' : String(s).replace(/[&<>"']/g, c => (
   { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])));
-const show = (id) => { ['login', 'overview', 'detail'].forEach(v => $(v).classList.toggle('hidden', v !== id)); };
+const show = (id) => { ['login', 'onboarding', 'overview', 'detail'].forEach(v => $(v).classList.toggle('hidden', v !== id)); };
 
 const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 function fmtDate(d) {
@@ -371,6 +463,25 @@ const CURRENCIES = ['EUR', 'USD', 'GBP', 'CHF', 'CAD', 'AUD', 'JPY', 'SEK', 'NOK
 const SYMBOL = { EUR: '€', USD: '$', GBP: '£', CHF: 'CHF', CAD: 'CA$', AUD: 'A$', JPY: '¥', SEK: 'kr', NOK: 'kr', DKK: 'kr', PLN: 'zł', CZK: 'Kč' };
 const sym = (c) => SYMBOL[c] || (c || '') + ' ';
 const fmtMoney = (n, c) => `${sym(c)}${money(Number(n) || 0)}`;
+
+// ---------- countries ----------
+const COUNTRIES = [["AF","Afghanistan"],["AX","Åland Islands"],["AL","Albania"],["DZ","Algeria"],["AS","American Samoa"],["AD","Andorra"],["AO","Angola"],["AI","Anguilla"],["AQ","Antarctica"],["AG","Antigua and Barbuda"],["AR","Argentina"],["AM","Armenia"],["AW","Aruba"],["AU","Australia"],["AT","Austria"],["AZ","Azerbaijan"],["BS","Bahamas"],["BH","Bahrain"],["BD","Bangladesh"],["BB","Barbados"],["BY","Belarus"],["BE","Belgium"],["BZ","Belize"],["BJ","Benin"],["BM","Bermuda"],["BT","Bhutan"],["BO","Bolivia"],["BQ","Bonaire, Sint Eustatius and Saba"],["BA","Bosnia and Herzegovina"],["BW","Botswana"],["BV","Bouvet Island"],["BR","Brazil"],["IO","British Indian Ocean Territory"],["BN","Brunei"],["BG","Bulgaria"],["BF","Burkina Faso"],["BI","Burundi"],["KH","Cambodia"],["CM","Cameroon"],["CA","Canada"],["CV","Cape Verde"],["KY","Cayman Islands"],["CF","Central African Republic"],["TD","Chad"],["CL","Chile"],["CN","China"],["CX","Christmas Island"],["CC","Cocos (Keeling) Islands"],["CO","Colombia"],["KM","Comoros"],["CD","Congo (DRC)"],["CG","Congo (Republic)"],["CK","Cook Islands"],["CR","Costa Rica"],["CI","Côte d'Ivoire"],["HR","Croatia"],["CU","Cuba"],["CW","Curaçao"],["CY","Cyprus"],["CZ","Czechia"],["DK","Denmark"],["DJ","Djibouti"],["DM","Dominica"],["DO","Dominican Republic"],["EC","Ecuador"],["EG","Egypt"],["SV","El Salvador"],["GQ","Equatorial Guinea"],["ER","Eritrea"],["EE","Estonia"],["SZ","Eswatini"],["ET","Ethiopia"],["FK","Falkland Islands (Malvinas)"],["FO","Faroe Islands"],["FJ","Fiji"],["FI","Finland"],["FR","France"],["GF","French Guiana"],["PF","French Polynesia"],["TF","French Southern Territories"],["GA","Gabon"],["GM","Gambia"],["GE","Georgia"],["DE","Germany"],["GH","Ghana"],["GI","Gibraltar"],["GR","Greece"],["GL","Greenland"],["GD","Grenada"],["GP","Guadeloupe"],["GU","Guam"],["GT","Guatemala"],["GG","Guernsey"],["GN","Guinea"],["GW","Guinea-Bissau"],["GY","Guyana"],["HT","Haiti"],["HM","Heard Island and McDonald Islands"],["VA","Holy See"],["HN","Honduras"],["HK","Hong Kong"],["HU","Hungary"],["IS","Iceland"],["IN","India"],["ID","Indonesia"],["IR","Iran"],["IQ","Iraq"],["IE","Ireland"],["IM","Isle of Man"],["IL","Israel"],["IT","Italy"],["JM","Jamaica"],["JP","Japan"],["JE","Jersey"],["JO","Jordan"],["KZ","Kazakhstan"],["KE","Kenya"],["KI","Kiribati"],["KW","Kuwait"],["KG","Kyrgyzstan"],["LA","Laos"],["LV","Latvia"],["LB","Lebanon"],["LS","Lesotho"],["LR","Liberia"],["LY","Libya"],["LI","Liechtenstein"],["LT","Lithuania"],["LU","Luxembourg"],["MO","Macao"],["MG","Madagascar"],["MW","Malawi"],["MY","Malaysia"],["MV","Maldives"],["ML","Mali"],["MT","Malta"],["MH","Marshall Islands"],["MQ","Martinique"],["MR","Mauritania"],["MU","Mauritius"],["YT","Mayotte"],["MX","Mexico"],["FM","Micronesia, Federated States of"],["MD","Moldova"],["MC","Monaco"],["MN","Mongolia"],["ME","Montenegro"],["MS","Montserrat"],["MA","Morocco"],["MZ","Mozambique"],["MM","Myanmar"],["NA","Namibia"],["NR","Nauru"],["NP","Nepal"],["NL","Netherlands, Kingdom of the"],["NC","New Caledonia"],["NZ","New Zealand"],["NI","Nicaragua"],["NE","Niger"],["NG","Nigeria"],["NU","Niue"],["NF","Norfolk Island"],["KP","North Korea"],["MK","North Macedonia"],["MP","Northern Mariana Islands"],["NO","Norway"],["OM","Oman"],["PK","Pakistan"],["PW","Palau"],["PS","Palestine"],["PA","Panama"],["PG","Papua New Guinea"],["PY","Paraguay"],["PE","Peru"],["PH","Philippines"],["PN","Pitcairn"],["PL","Poland"],["PT","Portugal"],["PR","Puerto Rico"],["QA","Qatar"],["RE","Réunion"],["RO","Romania"],["RU","Russia"],["RW","Rwanda"],["BL","Saint Barthélemy"],["SH","Saint Helena, Ascension and Tristan da Cunha"],["KN","Saint Kitts and Nevis"],["LC","Saint Lucia"],["MF","Saint Martin (French part)"],["PM","Saint Pierre and Miquelon"],["VC","Saint Vincent and the Grenadines"],["WS","Samoa"],["SM","San Marino"],["ST","Sao Tome and Principe"],["SA","Saudi Arabia"],["SN","Senegal"],["RS","Serbia"],["SC","Seychelles"],["SL","Sierra Leone"],["SG","Singapore"],["SX","Sint Maarten (Dutch part)"],["SK","Slovakia"],["SI","Slovenia"],["SB","Solomon Islands"],["SO","Somalia"],["ZA","South Africa"],["GS","South Georgia and the South Sandwich Islands"],["KR","South Korea"],["SS","South Sudan"],["ES","Spain"],["LK","Sri Lanka"],["SD","Sudan"],["SR","Suriname"],["SJ","Svalbard and Jan Mayen"],["SE","Sweden"],["CH","Switzerland"],["SY","Syria"],["TW","Taiwan"],["TJ","Tajikistan"],["TZ","Tanzania"],["TH","Thailand"],["TL","Timor-Leste"],["TG","Togo"],["TK","Tokelau"],["TO","Tonga"],["TT","Trinidad and Tobago"],["TN","Tunisia"],["TR","Türkiye"],["TM","Turkmenistan"],["TC","Turks and Caicos Islands"],["TV","Tuvalu"],["UG","Uganda"],["UA","Ukraine"],["AE","United Arab Emirates"],["GB","United Kingdom"],["US","United States"],["UM","United States Minor Outlying Islands"],["UY","Uruguay"],["UZ","Uzbekistan"],["VU","Vanuatu"],["VE","Venezuela"],["VN","Vietnam"],["VG","Virgin Islands (British)"],["VI","Virgin Islands (U.S.)"],["WF","Wallis and Futuna"],["EH","Western Sahara"],["YE","Yemen"],["ZM","Zambia"],["ZW","Zimbabwe"]];
+const COUNTRY_NAME = Object.fromEntries(COUNTRIES);
+const flagEmoji = (cc) => {
+  if (!cc || cc.length !== 2) return '';
+  const A = 0x1F1E6;
+  return String.fromCodePoint(A + cc.toUpperCase().charCodeAt(0) - 65, A + cc.toUpperCase().charCodeAt(1) - 65);
+};
+const countryLabel = (cc) => cc ? `${flagEmoji(cc)} ${COUNTRY_NAME[cc] || cc}` : '';
+// A <select> of all countries. `selected` is an ISO-2 or ''.
+function countrySelectHTML(selected, { blank = true, key = '' } = {}) {
+  const opts = (blank ? '<option value="">—</option>' : '') +
+    COUNTRIES.map(([cc, name]) => `<option value="${cc}"${cc === selected ? ' selected' : ''}>${flagEmoji(cc)} ${esc(name)}</option>`).join('');
+  return `<select${key ? ` data-key="${key}"` : ''}>${opts}</select>`;
+}
+// Currency guess from a country code (rough; user overrides).
+const COUNTRY_CCY = { US: 'USD', GB: 'GBP', CH: 'CHF', CA: 'CAD', AU: 'AUD', JP: 'JPY', SE: 'SEK', NO: 'NOK', DK: 'DKK', PL: 'PLN', CZ: 'CZK' };
+const currencyForCountry = (cc) => COUNTRY_CCY[cc] || 'EUR';
 
 // FX rates via frankfurter.app (ECB data, no key). Cached per from|to|date.
 const rateCache = new Map();
@@ -475,10 +586,140 @@ $('login-form').addEventListener('submit', async (e) => {
 });
 document.querySelectorAll('.signout').forEach(b => b.addEventListener('click', () => sb.auth.signOut()));
 
+let currentProfile = null;
+
+async function loadProfile() {
+  const { data: { user } } = await sb.auth.getUser();
+  if (!user) return null;
+  const { data } = await sb.from('profiles').select('*').eq('user_id', user.id).maybeSingle();
+  currentProfile = data || null;
+  return currentProfile;
+}
+
+// Route after auth: onboarding if no profile / not onboarded, else overview.
+async function routeAfterAuth() {
+  const p = await loadProfile();
+  if (!p || !p.onboarded_at) openOnboarding();
+  else routeToOverview();
+}
+
 sb.auth.onAuthStateChange((_event, session) => {
-  if (session) { routeToOverview(); }
-  else { show('login'); }
+  if (session) routeAfterAuth();
+  else { currentProfile = null; show('login'); }
 });
+
+// ---------- onboarding ----------
+function openOnboarding(isSettings = false) {
+  show('onboarding');
+  const p = currentProfile || {};
+  $('onboarding').querySelector('h1').textContent = isSettings ? 'Settings' : 'Welcome';
+  $('ob-sub').textContent = isSettings ? 'update your details' : 'a few details to set things up';
+  $('ob-signout').textContent = isSettings ? 'back' : 'sign out';
+
+  // simple text/select fields
+  $('onboarding-form').querySelector('[data-key="display_name"]').value = p.display_name || '';
+  $('onboarding-form').querySelector('[data-key="home_place"]').value = p.home_place || '';
+  $('onboarding-form').querySelector('[data-key="language"]').value = p.language || 'en';
+
+  $('ob-home-country').innerHTML = countrySelectHTML(p.home_country || '', { key: 'home_country' });
+  $('ob-currency').innerHTML = `<select data-key="base_currency">${CURRENCIES.map(c => `<option value="${c}"${c === (p.base_currency || 'EUR') ? ' selected' : ''}>${sym(c)} ${c}</option>`).join('')}</select>`;
+
+  const cits = p.citizenships && p.citizenships.length ? p.citizenships : [''];
+  $('ob-citizenship-primary').innerHTML = countrySelectHTML(cits[0] || '', { blank: false });
+  $('ob-extra-passports').innerHTML = cits.slice(1).map(cc =>
+    `<div class="perm-row">${countrySelectHTML(cc, { blank: false })}<button type="button" class="x" onclick="this.parentElement.remove()">remove</button></div>`).join('');
+
+  // home country → default currency (only when currency untouched / matches old default)
+  $('ob-home-country').querySelector('select').onchange = (e) => {
+    const cs = $('ob-currency').querySelector('select');
+    cs.value = currencyForCountry(e.target.value);
+  };
+
+  // permissions
+  const perms = isSettings ? (currentPermissions || []) : [];
+  $('ob-perms').innerHTML = perms.map(permRowHTML).join('');
+}
+function permRowHTML(perm = {}) {
+  const country = countrySelectHTML(perm.country || '', { blank: false }).replace('<select', '<select data-pk="country"');
+  return `<div class="perm-row" data-perm-id="${perm.id || ''}">
+    <select data-pk="kind">${['residency', 'long-stay visa', 'settled status', 'nomad visa', 'other'].map(k => `<option${k === perm.kind ? ' selected' : ''}>${k}</option>`).join('')}</select>
+    ${country}
+    <input type="text" data-pk="label" placeholder="label" value="${esc(perm.label || '')}" style="flex:1">
+    <button type="button" class="x" onclick="this.parentElement.remove()">×</button>
+  </div>`;
+}
+let currentPermissions = [];
+
+$('ob-add-passport').addEventListener('click', () => {
+  $('ob-extra-passports').insertAdjacentHTML('beforeend',
+    `<div class="perm-row">${countrySelectHTML('', { blank: false })}<button type="button" class="x" onclick="this.parentElement.remove()">remove</button></div>`);
+});
+$('ob-add-perm').addEventListener('click', () => {
+  $('ob-perms').insertAdjacentHTML('beforeend', permRowHTML());
+});
+$('ob-signout').addEventListener('click', () => {
+  if ($('ob-signout').textContent === 'back') routeToOverview();
+  else sb.auth.signOut();
+});
+
+$('onboarding-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  $('ob-save').disabled = true;
+  $('ob-msg').textContent = '';
+  try {
+    const { data: { user } } = await sb.auth.getUser();
+    const f = $('onboarding-form');
+    const primary = $('ob-citizenship-primary').querySelector('select').value;
+    if (!primary) throw new Error('Primary passport is required');
+    const extras = [...$('ob-extra-passports').querySelectorAll('select')].map(s => s.value).filter(Boolean);
+    const citizenships = [...new Set([primary, ...extras])];
+
+    const profile = {
+      user_id: user.id,
+      display_name: f.querySelector('[data-key="display_name"]').value.trim() || null,
+      home_country: $('ob-home-country').querySelector('select').value || null,
+      home_place: f.querySelector('[data-key="home_place"]').value.trim() || null,
+      base_currency: $('ob-currency').querySelector('select').value,
+      language: f.querySelector('[data-key="language"]').value,
+      citizenships,
+      onboarded_at: currentProfile?.onboarded_at || new Date().toISOString(),
+    };
+    const { error } = await sb.from('profiles').upsert(profile);
+    if (error) throw error;
+
+    // sync permissions
+    const rows = [...$('ob-perms').querySelectorAll('.perm-row')].map(r => ({
+      id: r.dataset.permId || undefined,
+      user_id: user.id,
+      kind: r.querySelector('[data-pk="kind"]').value,
+      country: r.querySelector('[data-pk="country"]').value || null,
+      label: r.querySelector('[data-pk="label"]').value.trim() || null,
+    }));
+    const keepIds = rows.filter(r => r.id).map(r => r.id);
+    const { data: existing } = await sb.from('travel_permissions').select('id').eq('user_id', user.id);
+    const toDelete = (existing || []).filter(x => !keepIds.includes(x.id)).map(x => x.id);
+    if (toDelete.length) await sb.from('travel_permissions').delete().in('id', toDelete);
+    for (const r of rows) {
+      if (r.id) await sb.from('travel_permissions').update(r).eq('id', r.id);
+      else { delete r.id; await sb.from('travel_permissions').insert(r); }
+    }
+
+    currentProfile = profile;
+    await loadPermissions();
+    routeToOverview();
+  } catch (err) {
+    $('ob-msg').textContent = err.message || String(err);
+    $('ob-save').disabled = false;
+  }
+});
+
+async function loadPermissions() {
+  const { data: { user } } = await sb.auth.getUser();
+  const { data } = await sb.from('travel_permissions').select('*').eq('user_id', user.id);
+  currentPermissions = data || [];
+  return currentPermissions;
+}
+$('settings-btn').addEventListener('click', async () => { await loadPermissions(); openOnboarding(true); });
 
 // ---------- overview ----------
 async function routeToOverview() {
@@ -1061,7 +1302,7 @@ const DOC_FIELDS = [
 
 function newTrip() {
   openForm({
-    title: 'New trip', fields: TRIP_FIELDS, values: { base_currency: 'EUR' },
+    title: 'New trip', fields: TRIP_FIELDS, values: { base_currency: currentProfile?.base_currency || 'EUR' },
     onSave: async (d) => {
       const { data: { user } } = await sb.auth.getUser();
       if (!d.base_currency) d.base_currency = guessCurrency(d.destination);
@@ -1161,7 +1402,7 @@ $('add-doc-btn').addEventListener('click', () => docForm());
 
 (async () => {
   const { data: { session } } = await sb.auth.getSession();
-  if (session) routeToOverview();
+  if (session) { await loadPermissions().catch(() => {}); routeAfterAuth(); }
   else show('login');
 })();
 </script>
