@@ -646,7 +646,20 @@ async function getRate(from, to, date) {
 // flights fall through to the text geocoder). Everything goes through the
 // /api/geocode proxy (Nominatim). All calls are timeout-bounded and
 // fire-and-forget from the save path — a slow/failed lookup never blocks the UI.
-const AIRPORTS = {}; // { IATA: { name, city, country, lat, lng } } — filled in a later commit
+// { IATA: { name, city, country, lat, lng } } — lazy-loaded from the bundled
+// table on first flight lookup, never on the login / overview path.
+let AIRPORTS = null;
+let airportsPromise = null;
+function loadAirports() {
+  if (AIRPORTS) return Promise.resolve(AIRPORTS);
+  if (!airportsPromise) {
+    airportsPromise = fetch('data/airports.json')
+      .then(r => r.ok ? r.json() : {})
+      .catch(() => ({}))
+      .then(j => (AIRPORTS = j));
+  }
+  return airportsPromise;
+}
 const geoCache = new Map();
 
 function extractIATA(text) {
@@ -688,9 +701,10 @@ async function geoForTransportEnd(text, mode) {
   if (!text) return null;
   if (mode === 'flight') {
     const iata = extractIATA(text);
-    if (iata && AIRPORTS[iata]) {
-      const a = AIRPORTS[iata];
-      return { lat: a.lat, lng: a.lng, source: 'iata' };
+    if (iata) {
+      const table = await loadAirports();
+      const a = table[iata];
+      if (a) return { lat: a.lat, lng: a.lng, source: 'iata' };
     }
   }
   const stationy = mode === 'bus' || mode === 'train' || mode === 'ferry';

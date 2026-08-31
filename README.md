@@ -39,6 +39,9 @@ public by design; Row-Level Security is the actual protection.
 |---|---|
 | `index.html` | The whole app — login, trips overview, tabbed trip view, CRUD |
 | `api/parse-ticket.js` | Vercel function: Gemini vision → structured travel fields |
+| `api/geocode.js` | Vercel function: Nominatim geocoding proxy (no key), for the maps |
+| `data/airports.json` | IATA → coords, bundled (OurAirports). `scripts/update-airports.sh` |
+| `data/world-110m.json` | Country outlines for globe + mini-maps. `scripts/update-world-outline.sh` |
 | `schema.sql` | Full schema, RLS, storage bucket, seed data |
 | `PRIVACY.md` | What's stored, where it goes, how to erase |
 | `HouseTrip_reference.html` | The original single-trip prototype, kept for reference |
