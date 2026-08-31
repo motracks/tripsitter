@@ -70,39 +70,135 @@ create table if not exists travel_docs (
   notes            text
 );
 
+-- Attachments (ticket / QR / doc scans) live in the private `tickets`
+-- storage bucket; the row holds the object path only.
+alter table stays       add column if not exists attachment_path text;
+alter table transport   add column if not exists attachment_path text;
+alter table travel_docs add column if not exists attachment_path text;
+
+-- Trip membership — future-proofs multi-user. The trip owner is always a
+-- member (see trigger below). `scope` is null for full-trip access, or a
+-- json array of section keys later (e.g. ["stays","transport"]).
+create table if not exists trip_members (
+  trip_id    uuid references trips(id) on delete cascade,
+  user_id    uuid references auth.users on delete cascade,
+  role       text default 'editor',   -- owner | editor | viewer
+  scope      jsonb,
+  created_at timestamptz default now(),
+  primary key (trip_id, user_id)
+);
+
+-- Owner auto-joins as a member on trip insert.
+create or replace function add_owner_as_member() returns trigger as $$
+begin
+  insert into trip_members (trip_id, user_id, role)
+  values (new.id, new.user_id, 'owner')
+  on conflict do nothing;
+  return new;
+end $$ language plpgsql security definer;
+
+drop trigger if exists trg_add_owner_member on trips;
+create trigger trg_add_owner_member after insert on trips
+  for each row execute function add_owner_as_member();
+
+-- Backfill membership for trips that predate the trigger.
+insert into trip_members (trip_id, user_id, role)
+  select id, user_id, 'owner' from trips
+  on conflict do nothing;
+
+-- Helper: is the current user a member of this trip?
+create or replace function is_trip_member(t uuid) returns boolean as $$
+  select exists (
+    select 1 from trip_members m
+    where m.trip_id = t and m.user_id = auth.uid()
+  );
+$$ language sql stable security definer;
+
+-- Same, but tolerates a text segment that may not be a uuid (storage paths).
+create or replace function is_trip_member_seg(seg text) returns boolean as $$
+declare tid uuid;
+begin
+  begin tid := seg::uuid; exception when others then return false; end;
+  return is_trip_member(tid);
+end $$ language plpgsql stable security definer;
+
 -- ---------------------------------------------------------------------------
--- Row Level Security — every row locked to its owner
+-- Row Level Security — trips/stays/transport gated on trip membership,
+-- travel_docs personal to the user
 -- ---------------------------------------------------------------------------
 
 alter table trips        enable row level security;
 alter table stays        enable row level security;
 alter table transport    enable row level security;
 alter table travel_docs  enable row level security;
+alter table trip_members enable row level security;
 
 drop policy if exists "own trips"        on trips;
 drop policy if exists "own travel_docs"  on travel_docs;
 drop policy if exists "own stays"        on stays;
 drop policy if exists "own transport"    on transport;
+drop policy if exists "member trips"     on trips;
+drop policy if exists "member stays"     on stays;
+drop policy if exists "member transport" on transport;
+drop policy if exists "member trip_members" on trip_members;
 
-create policy "own trips" on trips
-  for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
+-- Trips: visible to any member; only the owner may insert/delete, members edit.
+create policy "member trips" on trips
+  for all using (is_trip_member(id) or auth.uid() = user_id)
+  with check (auth.uid() = user_id or is_trip_member(id));
 
+-- Stays / transport: gated on trip membership.
+create policy "member stays" on stays
+  for all using (is_trip_member(trip_id)) with check (is_trip_member(trip_id));
+
+create policy "member transport" on transport
+  for all using (is_trip_member(trip_id)) with check (is_trip_member(trip_id));
+
+-- trip_members: a member can see the roster; the trip owner manages it.
+create policy "member trip_members" on trip_members
+  for all using (
+    is_trip_member(trip_id)
+  ) with check (
+    auth.uid() = (select user_id from trips where trips.id = trip_members.trip_id)
+  );
+
+-- Travel docs stay personal to the user (span trips).
 create policy "own travel_docs" on travel_docs
   for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
 
-create policy "own stays" on stays
-  for all using (
-    auth.uid() = (select user_id from trips where trips.id = stays.trip_id)
-  ) with check (
-    auth.uid() = (select user_id from trips where trips.id = stays.trip_id)
-  );
+-- ---------------------------------------------------------------------------
+-- Storage — private bucket for ticket / QR / doc images
+-- Object path convention: <trip_id>/<row_id>/<filename>  (docs: user/<user_id>/...)
+-- ---------------------------------------------------------------------------
 
-create policy "own transport" on transport
-  for all using (
-    auth.uid() = (select user_id from trips where trips.id = transport.trip_id)
-  ) with check (
-    auth.uid() = (select user_id from trips where trips.id = transport.trip_id)
-  );
+insert into storage.buckets (id, name, public)
+  values ('tickets', 'tickets', false)
+  on conflict (id) do nothing;
+
+drop policy if exists "tickets read"   on storage.objects;
+drop policy if exists "tickets write"  on storage.objects;
+drop policy if exists "tickets delete" on storage.objects;
+
+-- A user can touch an object when the first path segment is a trip they are
+-- a member of, or the literal 'user' followed by their own uid (travel docs).
+create policy "tickets read" on storage.objects for select using (
+  bucket_id = 'tickets' and (
+    is_trip_member_seg((storage.foldername(name))[1])
+    or ((storage.foldername(name))[1] = 'user' and (storage.foldername(name))[2] = auth.uid()::text)
+  )
+);
+create policy "tickets write" on storage.objects for insert with check (
+  bucket_id = 'tickets' and (
+    is_trip_member_seg((storage.foldername(name))[1])
+    or ((storage.foldername(name))[1] = 'user' and (storage.foldername(name))[2] = auth.uid()::text)
+  )
+);
+create policy "tickets delete" on storage.objects for delete using (
+  bucket_id = 'tickets' and (
+    is_trip_member_seg((storage.foldername(name))[1])
+    or ((storage.foldername(name))[1] = 'user' and (storage.foldername(name))[2] = auth.uid()::text)
+  )
+);
 
 -- ---------------------------------------------------------------------------
 -- Seed migration — the trip hardcoded in the original HouseTrip.html
