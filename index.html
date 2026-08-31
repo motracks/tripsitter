@@ -640,6 +640,134 @@ async function getRate(from, to, date) {
   return rate;
 }
 
+// ---------- geo resolution (maps feature) ----------
+// Coords are resolved once and cached on the row. Flights use a local airport
+// table (arrives in a later commit — AIRPORTS is stubbed empty for now, so
+// flights fall through to the text geocoder). Everything goes through the
+// /api/geocode proxy (Nominatim). All calls are timeout-bounded and
+// fire-and-forget from the save path — a slow/failed lookup never blocks the UI.
+const AIRPORTS = {}; // { IATA: { name, city, country, lat, lng } } — filled in a later commit
+const geoCache = new Map();
+
+function extractIATA(text) {
+  if (!text) return null;
+  const paren = String(text).match(/\(([A-Za-z]{3})\)/);
+  if (paren) return paren[1].toUpperCase();
+  const bare = String(text).match(/\b([A-Z]{3})\b/);
+  return bare ? bare[1] : null;
+}
+
+// "Chicago (ORD)" -> "Chicago"; "New York (31st & 8th)" -> "New York"
+function cityOnly(text) {
+  return String(text || '').replace(/\s*\([^)]*\)\s*/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
+async function geocode(q, country) {
+  q = String(q || '').trim();
+  if (q.length < 2) return null;
+  const key = q + '|' + (country || '');
+  if (geoCache.has(key)) return geoCache.get(key);
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), 8000);
+  let hit = null;
+  try {
+    const url = '/api/geocode?q=' + encodeURIComponent(q) + (country ? '&country=' + encodeURIComponent(country) : '');
+    const res = await fetch(url, { signal: ctrl.signal });
+    if (res.ok) {
+      const j = await res.json();
+      if (j && j.lat != null) hit = { lat: j.lat, lng: j.lng, display_name: j.display_name };
+    }
+  } catch { /* leave null */ }
+  finally { clearTimeout(t); }
+  geoCache.set(key, hit);
+  return hit;
+}
+
+// Resolve one transport endpoint. mode: 'flight' | 'bus' | 'train' | 'car' | 'ferry' | ...
+async function geoForTransportEnd(text, mode) {
+  if (!text) return null;
+  if (mode === 'flight') {
+    const iata = extractIATA(text);
+    if (iata && AIRPORTS[iata]) {
+      const a = AIRPORTS[iata];
+      return { lat: a.lat, lng: a.lng, source: 'iata' };
+    }
+  }
+  const stationy = mode === 'bus' || mode === 'train' || mode === 'ferry';
+  if (stationy) {
+    const hit = await geocode(text + ' station');
+    if (hit) return { lat: hit.lat, lng: hit.lng, source: 'station' };
+  } else {
+    const hit = await geocode(text);
+    if (hit) return { lat: hit.lat, lng: hit.lng, source: 'city' };
+  }
+  const city = cityOnly(text);
+  if (city && city !== text) {
+    const hit = await geocode(city);
+    if (hit) return { lat: hit.lat, lng: hit.lng, source: 'city' };
+  }
+  return null;
+}
+
+// Match a trip place tag to a stay's city, preferring one that carries coords.
+function placeTagForCity(city, placeTags) {
+  if (!city || !Array.isArray(placeTags)) return null;
+  const c = cityOnly(city).toLowerCase();
+  return placeTags.find(p => p.lat != null && p.label && c.includes(String(p.label).toLowerCase()))
+      || placeTags.find(p => p.label && c.includes(String(p.label).toLowerCase()))
+      || null;
+}
+
+async function geoForStay(stay, placeTags) {
+  const country = (placeTagForCity(stay.city, placeTags)?.country || '').toLowerCase() || null;
+  if (stay.address) {
+    const hit = await geocode(stay.address, country);
+    if (hit) return { lat: hit.lat, lng: hit.lng, source: 'address' };
+  }
+  const tag = placeTagForCity(stay.city, placeTags);
+  if (tag && tag.lat != null) return { lat: tag.lat, lng: tag.lng, source: 'placetag' };
+  if (stay.city) {
+    const hit = await geocode(cityOnly(stay.city), country);
+    if (hit) return { lat: hit.lat, lng: hit.lng, source: 'city' };
+  }
+  return null;
+}
+
+// Fire-and-forget: resolve a stay's coords after save and write them back.
+// Never runs over a manual pin. Errors are swallowed.
+function resolveStayGeo(row) {
+  if (!row || !row.id || row.geo_source === 'manual') return;
+  (async () => {
+    try {
+      const g = await geoForStay(row, currentTrip?.place_tags);
+      if (!g) return;
+      row.lat = g.lat; row.lng = g.lng; row.geo_source = g.source;
+      await sb.from('stays').update({ lat: g.lat, lng: g.lng, geo_source: g.source }).eq('id', row.id);
+    } catch { /* ignore */ }
+  })();
+}
+
+// Fire-and-forget: resolve both transport endpoints after save and write back.
+function resolveTransportGeo(row) {
+  if (!row || !row.id || row.geo_source === 'manual') return;
+  (async () => {
+    try {
+      const mode = (row.type || 'flight').toLowerCase();
+      const [o, d] = await Promise.all([
+        geoForTransportEnd(row.origin, mode),
+        geoForTransportEnd(row.destination, mode),
+      ]);
+      const patch = {};
+      if (o) { patch.origin_lat = o.lat; patch.origin_lng = o.lng; }
+      if (d) { patch.dest_lat = d.lat; patch.dest_lng = d.lng; }
+      if (!Object.keys(patch).length) return;
+      patch.geo_source = (o && d) ? (o.source === 'iata' || d.source === 'iata' ? 'iata' : o.source) : 'partial';
+      Object.assign(row, patch);
+      await sb.from('transport').update(patch).eq('id', row.id);
+    } catch { /* ignore */ }
+  })();
+}
+
 // Ensure a stay/transport row has amount_base in the trip's base currency,
 // converted at the rate for the day it was entered. Writes the cache back to
 // the DB when it computes something new. Mutates `row` in place.
@@ -1653,7 +1781,7 @@ function wireTagInput(container) {
         menu.classList.remove('hidden');
         menu.querySelectorAll('[data-res]').forEach(b => b.onclick = () => {
           const res = j.results[+b.dataset.res];
-          addTag({ label: res.label, kind: res.kind, country: res.country, admin: res.admin, geonameId: res.geonameId });
+          addTag({ label: res.label, kind: res.kind, country: res.country, admin: res.admin, geonameId: res.geonameId, lat: res.lat ?? null, lng: res.lng ?? null });
         });
       } catch { menu.classList.add('hidden'); }
     }, 250);
@@ -2047,9 +2175,9 @@ function stayForm(row) {
     values,
     attach: { table: 'stays', folder: currentTrip.id, rowId: row?.id, kind: 'stay', defaultKeep: false },
     onSave: async (d) => {
-      if (editing) { const { error } = await sb.from('stays').update(d).eq('id', row.id); if (error) throw error; return row; }
+      if (editing) { const { error } = await sb.from('stays').update(d).eq('id', row.id); if (error) throw error; Object.assign(row, d); resolveStayGeo(row); return row; }
       const { data, error } = await sb.from('stays').insert({ ...d, trip_id: currentTrip.id }).select().single();
-      if (error) throw error; return data;
+      if (error) throw error; resolveStayGeo(data); return data;
     },
     onDelete: editing ? async () => {
       const _p = row.attachment_paths || (row.attachment_path ? [row.attachment_path] : []); if (_p.length) await sb.storage.from("tickets").remove(_p);
@@ -2065,9 +2193,9 @@ function transportForm(row) {
     values: row || { type: 'flight', currency: currentTrip?.base_currency || 'EUR' },
     attach: { table: 'transport', folder: currentTrip.id, rowId: row?.id, kind: 'transport', defaultKeep: true },
     onSave: async (d) => {
-      if (editing) { const { error } = await sb.from('transport').update(d).eq('id', row.id); if (error) throw error; return row; }
+      if (editing) { const { error } = await sb.from('transport').update(d).eq('id', row.id); if (error) throw error; Object.assign(row, d); resolveTransportGeo(row); return row; }
       const { data, error } = await sb.from('transport').insert({ ...d, trip_id: currentTrip.id }).select().single();
-      if (error) throw error; return data;
+      if (error) throw error; resolveTransportGeo(data); return data;
     },
     onDelete: editing ? async () => {
       const _p = row.attachment_paths || (row.attachment_path ? [row.attachment_path] : []); if (_p.length) await sb.storage.from("tickets").remove(_p);

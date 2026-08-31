@@ -12,6 +12,21 @@ that keeps the project GDPR-conformant if it ever grows beyond one user.
 | Uploaded ticket / QR / document images | Supabase Storage, private `tickets` bucket | Only kept when "keep the image" is ticked on upload. Served via short-lived signed URLs, never public |
 | Auth (email + password hash) | Supabase Auth (EU region) | Managed by Supabase |
 | FX rates | fetched from frankfurter.app (ECB data), cached in-row | No personal data sent |
+| Map coordinates | resolved once, cached on the stay / transport row (`lat` / `lng` / `geo_source`) | See geocoding below |
+
+## Geocoding (`/api/geocode`)
+
+- Runs as a Vercel serverless function. Needs no API key.
+- To place stays and transport legs on the map, the stay **address** (or, failing
+  that, the city name) and transport origin / destination text are sent to the
+  **Nominatim** geocoder (OpenStreetMap Foundation, EU-hosted) via this proxy.
+  Airport codes resolve against a bundled local table and are **not** sent
+  anywhere.
+- The proxy identifies itself with a contact email per Nominatim's usage policy.
+  No account identifier or personal data beyond the place text is sent.
+- Results are cached hard (on the CDN and on the row) so each place is looked up
+  at most once. No third party beyond OpenStreetMap is involved; the world
+  outline and airport datasets are bundled with the app.
 
 ## The ticket parser (`/api/parse-ticket`)
 

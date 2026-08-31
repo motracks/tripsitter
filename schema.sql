@@ -38,6 +38,10 @@ alter table stays add column if not exists price numeric;
 alter table stays add column if not exists currency text default 'EUR';
 alter table stays add column if not exists amount_base numeric;
 alter table stays add column if not exists base_rate_date date;
+-- Geo (maps feature): resolved coordinates of the stay, cached on the row.
+alter table stays add column if not exists lat double precision;
+alter table stays add column if not exists lng double precision;
+alter table stays add column if not exists geo_source text;  -- 'address' | 'placetag' | 'city' | 'manual' | null
 
 create table if not exists transport (
   id           uuid primary key default gen_random_uuid(),
@@ -58,6 +62,12 @@ create table if not exists transport (
 alter table transport add column if not exists currency text default 'EUR';
 alter table transport add column if not exists amount_base numeric;
 alter table transport add column if not exists base_rate_date date;
+-- Geo (maps feature): resolved coordinates of both ends, cached on the row.
+alter table transport add column if not exists origin_lat double precision;
+alter table transport add column if not exists origin_lng double precision;
+alter table transport add column if not exists dest_lat double precision;
+alter table transport add column if not exists dest_lng double precision;
+alter table transport add column if not exists geo_source text;  -- 'iata' | 'station' | 'city' | 'manual' | 'partial' | null
 
 create table if not exists travel_docs (
   id               uuid primary key default gen_random_uuid(),

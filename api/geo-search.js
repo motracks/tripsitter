@@ -35,6 +35,8 @@ export default async function handler(req, res) {
       country: g.countryCode || null,          // ISO-2
       admin: g.adminName1 || null,
       geonameId: g.geonameId,
+      lat: g.lat != null ? Number(g.lat) : null,
+      lng: g.lng != null ? Number(g.lng) : null,
       context: [g.adminName1, g.countryName].filter(Boolean).join(', '),
     }));
 
