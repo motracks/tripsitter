@@ -26,8 +26,12 @@ create table if not exists stays (
   host_name  text,
   address    text,
   pets       text,
+  price      numeric,   -- what the stay cost (0 / null for unpaid sits)
   notes      text
 );
+
+-- If the table already existed without it:
+alter table stays add column if not exists price numeric;
 
 create table if not exists transport (
   id           uuid primary key default gen_random_uuid(),
@@ -108,12 +112,12 @@ begin
   values (uid, 'HouseTrip · USA', 'USA', '2026-04-23', '2026-06-01', 'upcoming')
   returning id into tid;
 
-  insert into stays (trip_id, type, city, start_date, end_date, host_name, address, pets, notes) values
-    (tid, 'hostel', 'Chicago, IL',      '2026-04-24', '2026-04-25', null,   '24 E Ida B Wells Dr, Chicago IL 60605',      null,                         'HI Chicago · Confirmation #16263020 · Men''s 10-Bed Dorm · check-in after 4pm, out by 11am · $57.06'),
-    (tid, 'THS',    'Chicago, IL',      '2026-04-25', '2026-05-05', 'Kara', '215 E Chestnut St, Apt 204, Chicago IL 60611', 'Dogs: Apolo & Berkeley',    '10 nights · TrustedHousesitters · walk 60 mins total'),
-    (tid, 'THS',    'Brooklyn, NY',     '2026-05-06', '2026-05-21', 'Jared', null,                                        'Dogs: Bruce & Remi',        '15 nights · TrustedHousesitters · walk 30 mins'),
-    (tid, 'THS',    'Washington, D.C.', '2026-05-22', '2026-05-25', 'Lia',  null,                                         'Dogs: Bartleby & Oswald; Cats: Reggie & Sammy', '3 nights · TrustedHousesitters · no walk needed'),
-    (tid, 'THS',    'New York City, NY','2026-05-25', '2026-05-31', 'Laura', '156 W 120th St, Garden Level, New York NY 10027', 'Dogs: Kate & Prudence',  '6 nights · TrustedHousesitters · walk 60 mins');
+  insert into stays (trip_id, type, city, start_date, end_date, host_name, address, pets, price, notes) values
+    (tid, 'hostel', 'Chicago, IL',      '2026-04-24', '2026-04-25', null,   '24 E Ida B Wells Dr, Chicago IL 60605',      null,                         57.06, 'HI Chicago · Confirmation #16263020 · Men''s 10-Bed Dorm · check-in after 4pm, out by 11am'),
+    (tid, 'THS',    'Chicago, IL',      '2026-04-25', '2026-05-05', 'Kara', '215 E Chestnut St, Apt 204, Chicago IL 60611', 'Dogs: Apolo & Berkeley',    0,     '10 nights · TrustedHousesitters · walk 60 mins total'),
+    (tid, 'THS',    'Brooklyn, NY',     '2026-05-06', '2026-05-21', 'Jared', null,                                        'Dogs: Bruce & Remi',        0,     '15 nights · TrustedHousesitters · walk 30 mins'),
+    (tid, 'THS',    'Washington, D.C.', '2026-05-22', '2026-05-25', 'Lia',  null,                                         'Dogs: Bartleby & Oswald; Cats: Reggie & Sammy', 0, '3 nights · TrustedHousesitters · no walk needed'),
+    (tid, 'THS',    'New York City, NY','2026-05-25', '2026-05-31', 'Laura', '156 W 120th St, Garden Level, New York NY 10027', 'Dogs: Kate & Prudence',  0,     '6 nights · TrustedHousesitters · walk 60 mins');
 
   insert into transport (trip_id, type, origin, destination, departure, arrival, carrier, booking_code, price, notes) values
     (tid, 'flight', 'Frankfurt (FRA)',        'New York (JFK)',       '2026-04-23 11:50', '2026-04-23 14:36', 'KLM / Delta A330-200', 'XGTGX2',        573.48, 'KL6107 · boarding 10:55 · seat 33F class V · zone 7 · 9h 46m · price is return'),

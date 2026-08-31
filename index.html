@@ -139,8 +139,13 @@
   .tc-dates { font-size: 11px; font-family: 'DM Mono', monospace; color: var(--faint); margin-top: 8px; }
   .status-pill { font-size: 10px; font-family: 'DM Mono', monospace; padding: 3px 9px; border-radius: 99px; text-transform: uppercase; letter-spacing: 0.06em; flex-shrink: 0; }
   .status-upcoming { background: var(--blue-dim); color: var(--blue); }
-  .status-active { background: var(--green-dim); color: var(--green); }
-  .status-past { background: var(--faint); color: var(--muted); }
+  .status-ongoing { background: var(--green-dim); color: var(--green); }
+  .status-done { background: var(--faint); color: var(--muted); }
+
+  .total-bar { background: var(--surface); border: 0.5px solid var(--border); border-radius: var(--r); padding: 14px 16px; display: flex; justify-content: space-between; align-items: center; margin-top: 10px; }
+  .total-bar .tb-label { font-size: 11px; font-family: 'DM Mono', monospace; color: var(--muted); text-transform: uppercase; letter-spacing: 0.08em; }
+  .total-bar .tb-value { font-size: 14px; font-weight: 700; color: var(--green); text-align: right; }
+  .total-bar .tb-sub { font-size: 10px; color: var(--muted); font-family: 'DM Mono', monospace; margin-top: 2px; }
 
   .section-label { font-size: 10px; font-family: 'DM Mono', monospace; color: var(--faint); text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 10px; margin-top: 0.5rem; }
   .empty-note { font-size: 12px; font-family: 'DM Mono', monospace; color: var(--faint); text-align: center; padding: 2rem 0; }
@@ -214,16 +219,19 @@
   <div class="panel active" id="panel-trip">
     <p class="section-label">Full timeline</p>
     <div class="timeline" id="timeline"><div class="tl-line"></div></div>
+    <div id="trip-total"></div>
   </div>
 
   <div class="panel" id="panel-stays">
     <p class="section-label">Accommodations</p>
     <div class="card-grid" id="stays-list"></div>
+    <div id="stays-total"></div>
   </div>
 
   <div class="panel" id="panel-transport">
     <p class="section-label">Flights &amp; ground</p>
     <div class="card-grid" id="transport-list"></div>
+    <div id="transport-total"></div>
   </div>
 
   <div class="panel" id="panel-visa">
@@ -268,6 +276,29 @@ function nights(a, b) {
   if (!a || !b) return null;
   return Math.round((new Date(b) - new Date(a)) / 86400000);
 }
+// Date-sensitive status from the trip's own dates. Falls back to stored
+// status only when dates are missing.
+function tripStatus(trip) {
+  const s = trip?.start_date, e = trip?.end_date;
+  if (!s && !e) return (trip?.status || 'upcoming').toLowerCase();
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const start = s ? new Date(s + 'T00:00:00') : null;
+  const end = e ? new Date(e + 'T00:00:00') : null;
+  if (start && today < start) return 'upcoming';
+  if (end && today > end) return 'done';
+  return 'ongoing';
+}
+// Sum a numeric column, ignoring null/NaN/0. Returns { total, count } where
+// count is how many rows carried a real (non-zero) value.
+function sumMoney(rows, key) {
+  let total = 0, count = 0;
+  for (const r of rows) {
+    const v = Number(r[key]);
+    if (r[key] != null && !Number.isNaN(v) && v !== 0) { total += v; count++; }
+  }
+  return { total, count };
+}
+const money = (n) => n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 window.copyText = function (text, btn) {
   navigator.clipboard.writeText(text).then(() => {
     const orig = btn.textContent;
@@ -329,7 +360,7 @@ async function routeToOverview() {
   if (error) { list.innerHTML = `<p class="empty-note">${esc(error.message)}</p>`; return; }
   if (!trips.length) { list.innerHTML = `<p class="empty-note">No trips yet.</p>`; return; }
   list.innerHTML = trips.map(t => {
-    const st = (t.status || 'upcoming').toLowerCase();
+    const st = tripStatus(t);
     const dates = t.start_date
       ? `${fmtDateY(t.start_date)} – ${fmtDateY(t.end_date)}`
       : '';
@@ -386,6 +417,29 @@ async function openTrip(tripId) {
   renderStays(stays || []);
   renderTransport(transport || []);
   renderVisa(docs || [], trip);
+  renderTotals(stays || [], transport || []);
+}
+
+// Money sums over the user-supplied `price` values on stays and transport.
+function totalBar(id, label, count, total, subExtra) {
+  const el = $(id);
+  if (!count) { el.innerHTML = ''; return; }
+  el.innerHTML = `<div class="total-bar">
+    <span class="tb-label">${esc(label)}</span>
+    <div>
+      <div class="tb-value">${money(total)}</div>
+      <div class="tb-sub">${count} item${count === 1 ? '' : 's'} with a value${subExtra ? ' · ' + esc(subExtra) : ''}</div>
+    </div>
+  </div>`;
+}
+function renderTotals(stays, transport) {
+  const tp = sumMoney(transport, 'price');
+  const st = sumMoney(stays, 'price');
+  totalBar('transport-total', 'Total transport', tp.count, tp.total);
+  totalBar('stays-total', 'Total stays', st.count, st.total);
+  const tripCount = tp.count + st.count;
+  totalBar('trip-total', 'Trip total', tripCount, tp.total + st.total,
+    tripCount ? `transport ${money(tp.total)} + stays ${money(st.total)}` : '');
 }
 
 function renderEsta(trip) {
@@ -475,6 +529,7 @@ function renderStays(stays) {
       `<div class="detail-row"><span class="detail-label">Dates</span><span class="detail-value">${esc(fmtDateY(s.start_date))} – ${esc(fmtDateY(s.end_date))}</span></div>`,
       s.address && `<div class="detail-row"><span class="detail-label">Address</span><span class="detail-value"><a href="https://maps.google.com/?q=${encodeURIComponent(s.address)}" target="_blank">${esc(s.address)} ↗</a></span></div>`,
       s.pets && `<div class="detail-row"><span class="detail-label">Pets</span><span class="detail-value">${esc(s.pets)}</span></div>`,
+      s.price != null && `<div class="detail-row"><span class="detail-label">Price</span><span class="detail-value">${Number(s.price) === 0 ? 'unpaid' : money(Number(s.price))}</span></div>`,
       s.notes && `<div class="detail-row"><span class="detail-label">Notes</span><span class="detail-value">${esc(s.notes)}</span></div>`,
     ].filter(Boolean).join('');
     return `<div class="info-card" onclick="toggleCard(this)">
