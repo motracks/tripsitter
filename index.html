@@ -808,14 +808,17 @@ try { collapsedSections = new Set(JSON.parse(localStorage.getItem('ts_collapsed'
 
 async function routeToOverview() {
   show('overview');
+  const list = $('trips-list');
+  list.innerHTML = '<p class="empty-note">loading…</p>';
   const { data: { user } } = await sb.auth.getUser();
   $('overview-sub').textContent = user?.email || 'travel archive';
-  const [{ data: trips, error }, { data: allStays }, { data: allTransport }] = await Promise.all([
+  const [tripsRes, staysRes, transportRes] = await Promise.all([
     sb.from('trips').select('*').order('start_date', { ascending: false }),
     sb.from('stays').select('trip_id, price, currency, amount_base'),
     sb.from('transport').select('trip_id, price, currency, amount_base'),
   ]);
-  const list = $('trips-list');
+  const { data: trips, error } = tripsRes;
+  const allStays = staysRes.data, allTransport = transportRes.data;
   if (error) { list.innerHTML = `<p class="empty-note">${esc(error.message)}</p>`; return; }
   if (!trips.length) { list.innerHTML = `<p class="empty-note">No trips yet.</p>`; return; }
 
@@ -1032,13 +1035,22 @@ window.setTransportCurrency = (cur, id) =>
 let visaData = null, visaMeta = null;
 async function loadVisaData() {
   if (visaData) return visaData;
-  try {
-    const [d, m] = await Promise.all([
-      fetch('/data/passport-index.json').then(r => r.json()),
-      fetch('/data/passport-index.meta.json').then(r => r.json()).catch(() => null),
-    ]);
-    visaData = d; visaMeta = m;
-  } catch { visaData = {}; }
+  const grab = async (url, ms) => {
+    const c = new AbortController();
+    const t = setTimeout(() => c.abort(), ms);
+    try {
+      const r = await fetch(url, { signal: c.signal });
+      if (!r.ok) return null;
+      return await r.json();
+    } catch { return null; }
+    finally { clearTimeout(t); }
+  };
+  const [d, m] = await Promise.all([
+    grab('/data/passport-index.json', 12000),
+    grab('/data/passport-index.meta.json', 6000),
+  ]);
+  visaData = d || {};       // {} = "no data", handled downstream
+  visaMeta = m;
   return visaData;
 }
 
@@ -1740,9 +1752,14 @@ $('add-transport-btn-2').addEventListener('click', () => transportForm());
 $('add-doc-btn').addEventListener('click', () => docForm());
 
 (async () => {
-  const { data: { session } } = await sb.auth.getSession();
-  if (session) { await loadPermissions().catch(() => {}); routeAfterAuth(); }
-  else show('login');
+  let session = null;
+  try {
+    const withTimeout = (p, ms) => Promise.race([p, new Promise((_, r) => setTimeout(() => r(new Error('timeout')), ms))]);
+    ({ data: { session } } = await withTimeout(sb.auth.getSession(), 8000));
+  } catch (e) { console.error('getSession:', e); }
+  if (!session) { show('login'); return; }
+  loadPermissions().catch(() => {});   // background, non-blocking
+  routeAfterAuth();
 })();
 </script>
 </body>
