@@ -1,0 +1,543 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>TripSitter</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;500;600;700&family=DM+Mono:wght@300;400&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #0d0f0e;
+    --surface: #161918;
+    --surface2: #1e2220;
+    --border: rgba(255,255,255,0.07);
+    --border2: rgba(255,255,255,0.12);
+    --text: #f0ede8;
+    --muted: rgba(240,237,232,0.45);
+    --faint: rgba(240,237,232,0.18);
+    --green: #4ade9a;
+    --green-dim: rgba(74,222,154,0.12);
+    --amber: #f5c542;
+    --amber-dim: rgba(245,197,66,0.10);
+    --red: #ff5f57;
+    --red-dim: rgba(255,95,87,0.12);
+    --blue: #60aaff;
+    --blue-dim: rgba(96,170,255,0.10);
+    --r: 10px;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--text); font-family: 'Syne', sans-serif; min-height: 100vh; padding-bottom: 3rem; }
+  a { color: var(--blue); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+
+  .wrap { max-width: 560px; margin: 0 auto; }
+
+  /* LOGIN */
+  #login { max-width: 360px; margin: 18vh auto 0; padding: 0 1.25rem; }
+  #login h1 { font-size: 30px; font-weight: 700; letter-spacing: -0.01em; }
+  #login p.tag { font-size: 12px; color: var(--muted); font-family: 'DM Mono', monospace; margin-top: 4px; margin-bottom: 2rem; }
+  #login form { display: flex; flex-direction: column; gap: 10px; }
+  #login input {
+    background: var(--surface); border: 0.5px solid var(--border2); border-radius: var(--r);
+    padding: 12px 14px; color: var(--text); font-family: 'DM Mono', monospace; font-size: 13px;
+  }
+  #login input:focus { outline: none; border-color: var(--green); }
+  #login button {
+    background: var(--green); color: #0d0f0e; border: 0; border-radius: var(--r);
+    padding: 12px 0; font-family: 'Syne', sans-serif; font-size: 13px; font-weight: 600;
+    cursor: pointer; margin-top: 4px;
+  }
+  #login .linkbtn {
+    background: none; border: 0; color: var(--muted); font-family: 'DM Mono', monospace;
+    font-size: 11px; cursor: pointer; margin-top: 8px; text-align: center;
+  }
+  .msg { font-size: 11px; font-family: 'DM Mono', monospace; margin-top: 6px; min-height: 14px; }
+  .msg.err { color: var(--red); }
+  .msg.ok { color: var(--green); }
+
+  /* HEADER */
+  header { padding: 2rem 1.25rem 1rem; display: flex; align-items: flex-end; justify-content: space-between; }
+  .header-left h1 { font-size: 26px; font-weight: 700; letter-spacing: -0.01em; }
+  .header-left p { font-size: 12px; color: var(--muted); font-family: 'DM Mono', monospace; margin-top: 3px; }
+  .header-right { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; }
+  .signout { background: none; border: 0.5px solid var(--border2); color: var(--muted); border-radius: 99px;
+    padding: 4px 10px; font-family: 'DM Mono', monospace; font-size: 10px; cursor: pointer; }
+  .backbtn { background: none; border: 0; color: var(--muted); font-family: 'DM Mono', monospace;
+    font-size: 11px; cursor: pointer; padding: 0; }
+
+  .esta-badge { display: flex; flex-direction: column; align-items: flex-end; gap: 2px; }
+  .esta-days { font-size: 22px; font-weight: 700; line-height: 1; color: var(--green); }
+  .esta-days.warn { color: var(--amber); }
+  .esta-days.danger { color: var(--red); }
+  .esta-unit { font-size: 11px; color: var(--muted); font-family: 'DM Mono', monospace; }
+  .esta-label { font-size: 10px; font-family: 'DM Mono', monospace; color: var(--muted); text-transform: uppercase; letter-spacing: 0.08em; }
+  .esta-bar-wrap { width: 80px; height: 3px; background: var(--border2); border-radius: 99px; overflow: hidden; margin-top: 4px; }
+  .esta-bar { height: 100%; border-radius: 99px; background: var(--green); }
+  .esta-bar.warn { background: var(--amber); }
+  .esta-bar.danger { background: var(--red); }
+
+  /* TABS */
+  .tabs { display: flex; gap: 6px; padding: 0 1.25rem; margin-bottom: 1.25rem; }
+  .tab { flex: 1; padding: 9px 0; border-radius: var(--r); border: 0.5px solid var(--border); background: var(--surface); color: var(--muted); font-family: 'Syne', sans-serif; font-size: 12px; font-weight: 500; cursor: pointer; letter-spacing: 0.03em; transition: all 0.15s; text-align: center; }
+  .tab.active { background: var(--surface2); border-color: var(--border2); color: var(--text); }
+
+  .panel { display: none; padding: 0 1.25rem; }
+  .panel.active { display: block; }
+
+  /* TIMELINE */
+  .timeline { position: relative; }
+  .tl-line { position: absolute; left: 19px; top: 8px; bottom: 8px; width: 1px; background: var(--border2); }
+  .tl-item { display: flex; gap: 14px; margin-bottom: 10px; animation: fadeUp 0.3s ease both; }
+  .tl-dot-wrap { flex-shrink: 0; width: 38px; display: flex; flex-direction: column; align-items: center; padding-top: 14px; }
+  .tl-dot { width: 10px; height: 10px; border-radius: 50%; border: 2px solid var(--border2); background: var(--bg); }
+  .tl-dot.flight { border-color: var(--blue); background: var(--blue-dim); }
+  .tl-dot.bus { border-color: var(--green); background: var(--green-dim); }
+  .tl-dot.train { border-color: var(--amber); background: var(--amber-dim); }
+  .tl-dot.stay { border-color: var(--faint); background: var(--bg); }
+
+  .tl-card { flex: 1; background: var(--surface); border: 0.5px solid var(--border); border-radius: var(--r); padding: 12px 14px; cursor: pointer; transition: border-color 0.15s; }
+  .tl-card:hover { border-color: var(--border2); }
+  .tl-card.expanded { border-color: var(--border2); }
+  .tl-card-header { display: flex; align-items: center; justify-content: space-between; }
+
+  .tl-type-pill { font-size: 10px; font-family: 'DM Mono', monospace; padding: 2px 7px; border-radius: 99px; letter-spacing: 0.06em; text-transform: uppercase; }
+  .pill-flight { background: var(--blue-dim); color: var(--blue); }
+  .pill-bus { background: var(--green-dim); color: var(--green); }
+  .pill-train { background: var(--amber-dim); color: var(--amber); }
+  .pill-stay { background: var(--faint); color: var(--muted); }
+
+  .tl-date { font-size: 11px; font-family: 'DM Mono', monospace; color: var(--muted); }
+  .tl-title { font-size: 15px; font-weight: 600; margin-top: 6px; line-height: 1.3; }
+  .tl-sub { font-size: 12px; color: var(--muted); margin-top: 2px; }
+
+  .tl-details { display: none; margin-top: 12px; padding-top: 12px; border-top: 0.5px solid var(--border); flex-direction: column; gap: 8px; }
+  .tl-details.open { display: flex; }
+
+  .detail-row { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
+  .detail-label { font-size: 11px; font-family: 'DM Mono', monospace; color: var(--muted); flex-shrink: 0; }
+  .detail-value { font-size: 12px; font-weight: 500; text-align: right; }
+
+  /* INFO CARDS */
+  .card-grid { display: flex; flex-direction: column; gap: 10px; }
+  .info-card { background: var(--surface); border: 0.5px solid var(--border); border-radius: var(--r); padding: 14px 16px; cursor: pointer; transition: border-color 0.15s; }
+  .info-card:hover { border-color: var(--border2); }
+  .info-card.expanded { border-color: var(--border2); }
+  .ic-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+  .ic-city { font-size: 17px; font-weight: 700; }
+  .ic-dates { font-size: 11px; font-family: 'DM Mono', monospace; color: var(--muted); margin-top: 3px; }
+  .ic-tag { font-size: 10px; font-family: 'DM Mono', monospace; color: var(--muted); border: 0.5px solid var(--border2); border-radius: 99px; padding: 2px 8px; flex-shrink: 0; }
+  .ic-details { display: none; margin-top: 12px; padding-top: 12px; border-top: 0.5px solid var(--border); flex-direction: column; gap: 8px; }
+  .ic-details.open { display: flex; }
+
+  /* TRIP CARDS (overview) */
+  .trip-card { display: block; background: var(--surface); border: 0.5px solid var(--border); border-radius: var(--r); padding: 16px 18px; cursor: pointer; transition: border-color 0.15s, transform 0.15s; }
+  .trip-card:hover { border-color: var(--border2); transform: translateY(-1px); }
+  .trip-card .tc-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+  .tc-name { font-size: 18px; font-weight: 700; letter-spacing: -0.01em; }
+  .tc-dest { font-size: 12px; font-family: 'DM Mono', monospace; color: var(--muted); margin-top: 3px; }
+  .tc-dates { font-size: 11px; font-family: 'DM Mono', monospace; color: var(--faint); margin-top: 8px; }
+  .status-pill { font-size: 10px; font-family: 'DM Mono', monospace; padding: 3px 9px; border-radius: 99px; text-transform: uppercase; letter-spacing: 0.06em; flex-shrink: 0; }
+  .status-upcoming { background: var(--blue-dim); color: var(--blue); }
+  .status-active { background: var(--green-dim); color: var(--green); }
+  .status-past { background: var(--faint); color: var(--muted); }
+
+  .section-label { font-size: 10px; font-family: 'DM Mono', monospace; color: var(--faint); text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 10px; margin-top: 0.5rem; }
+  .empty-note { font-size: 12px; font-family: 'DM Mono', monospace; color: var(--faint); text-align: center; padding: 2rem 0; }
+
+  .copy-btn { font-family: 'DM Mono', monospace; font-size: 10px; color: var(--muted); background: var(--surface2); border: 0.5px solid var(--border2); border-radius: 6px; padding: 2px 7px; cursor: pointer; transition: color 0.15s; }
+  .copy-btn:active { color: var(--green); }
+
+  .hidden { display: none !important; }
+  @keyframes fadeUp { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+</style>
+</head>
+<body>
+
+<!-- LOGIN VIEW -->
+<div id="login" class="hidden">
+  <h1>TripSitter</h1>
+  <p class="tag">travel archive · sign in</p>
+  <form id="login-form">
+    <input type="email" id="email" placeholder="email" autocomplete="email" required>
+    <input type="password" id="password" placeholder="password" autocomplete="current-password" required>
+    <button type="submit" id="login-submit">Sign in</button>
+  </form>
+  <button class="linkbtn" id="toggle-signup">No account? Sign up</button>
+  <div class="msg" id="login-msg"></div>
+</div>
+
+<!-- TRIPS OVERVIEW VIEW -->
+<div id="overview" class="hidden wrap">
+  <header>
+    <div class="header-left">
+      <h1>Trips</h1>
+      <p id="overview-sub">travel archive</p>
+    </div>
+    <div class="header-right">
+      <button class="signout" id="signout-1">sign out</button>
+    </div>
+  </header>
+  <div style="padding:0 1.25rem">
+    <p class="section-label">All trips</p>
+    <div class="card-grid" id="trips-list"></div>
+  </div>
+</div>
+
+<!-- TRIP DETAIL VIEW -->
+<div id="detail" class="hidden wrap">
+  <header>
+    <div class="header-left">
+      <button class="backbtn" id="back-btn">← all trips</button>
+      <h1 id="detail-name">Trip</h1>
+      <p id="detail-sub"></p>
+    </div>
+    <div class="header-right">
+      <div class="esta-badge" id="esta-badge">
+        <div style="display:flex;align-items:baseline;gap:4px">
+          <div class="esta-days" id="esta-days">–</div>
+          <div class="esta-unit">Days</div>
+        </div>
+        <div class="esta-label">/ 90 days esta</div>
+        <div class="esta-bar-wrap"><div class="esta-bar" id="esta-bar" style="width:0%"></div></div>
+      </div>
+    </div>
+  </header>
+
+  <div class="tabs">
+    <button class="tab active" data-tab="trip">Trip</button>
+    <button class="tab" data-tab="stays">Stays</button>
+    <button class="tab" data-tab="transport">Transport</button>
+    <button class="tab" data-tab="visa">Visa</button>
+  </div>
+
+  <div class="panel active" id="panel-trip">
+    <p class="section-label">Full timeline</p>
+    <div class="timeline" id="timeline"><div class="tl-line"></div></div>
+  </div>
+
+  <div class="panel" id="panel-stays">
+    <p class="section-label">Accommodations</p>
+    <div class="card-grid" id="stays-list"></div>
+  </div>
+
+  <div class="panel" id="panel-transport">
+    <p class="section-label">Flights &amp; ground</p>
+    <div class="card-grid" id="transport-list"></div>
+  </div>
+
+  <div class="panel" id="panel-visa">
+    <p class="section-label">Travel authorizations</p>
+    <div class="card-grid" id="visa-list"></div>
+  </div>
+</div>
+
+<script type="module">
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+
+const SUPABASE_URL = 'https://yrwpesoxofqeosokcdzs.supabase.co';
+const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inlyd3Blc294b2ZxZW9zb2tjZHpzIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODgxODAzMDcsImV4cCI6MjEwMzc1NjMwN30.JgKUu8C2YOAq7voN2M1dh1Md6r2hg2aOC9gEATjd2j8';
+
+const sb = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+// ---------- helpers ----------
+const $ = (id) => document.getElementById(id);
+const esc = (s) => (s == null ? '' : String(s).replace(/[&<>"']/g, c => (
+  { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])));
+const show = (id) => { ['login', 'overview', 'detail'].forEach(v => $(v).classList.toggle('hidden', v !== id)); };
+
+const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+function fmtDate(d) {
+  if (!d) return '';
+  const dt = new Date(d + (d.length === 10 ? 'T00:00:00' : ''));
+  return `${dt.getDate()} ${MONTHS[dt.getMonth()]}`;
+}
+function fmtDateY(d) {
+  if (!d) return '';
+  const dt = new Date(d + (d.length === 10 ? 'T00:00:00' : ''));
+  return `${dt.getDate()} ${MONTHS[dt.getMonth()]} ${dt.getFullYear()}`;
+}
+function fmtDT(ts) {
+  if (!ts) return '';
+  const dt = new Date(ts);
+  const hh = String(dt.getHours()).padStart(2, '0');
+  const mm = String(dt.getMinutes()).padStart(2, '0');
+  return `${dt.getDate()} ${MONTHS[dt.getMonth()]} ${hh}:${mm}`;
+}
+function nights(a, b) {
+  if (!a || !b) return null;
+  return Math.round((new Date(b) - new Date(a)) / 86400000);
+}
+window.copyText = function (text, btn) {
+  navigator.clipboard.writeText(text).then(() => {
+    const orig = btn.textContent;
+    btn.textContent = 'copied ✓';
+    btn.style.color = 'var(--green)';
+    setTimeout(() => { btn.textContent = orig; btn.style.color = ''; }, 1800);
+  });
+};
+window.toggleCard = function (card) {
+  const details = card.querySelector('.tl-details, .ic-details');
+  if (!details) return;
+  const open = details.classList.contains('open');
+  details.classList.toggle('open', !open);
+  card.classList.toggle('expanded', !open);
+};
+
+// ---------- auth ----------
+let signupMode = false;
+$('toggle-signup').addEventListener('click', () => {
+  signupMode = !signupMode;
+  $('login-submit').textContent = signupMode ? 'Sign up' : 'Sign in';
+  $('toggle-signup').textContent = signupMode ? 'Have an account? Sign in' : 'No account? Sign up';
+  $('password').autocomplete = signupMode ? 'new-password' : 'current-password';
+  setMsg('');
+});
+function setMsg(text, kind) {
+  const el = $('login-msg');
+  el.textContent = text;
+  el.className = 'msg' + (kind ? ' ' + kind : '');
+}
+$('login-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const email = $('email').value.trim();
+  const password = $('password').value;
+  setMsg('…');
+  const fn = signupMode ? sb.auth.signUp({ email, password }) : sb.auth.signInWithPassword({ email, password });
+  const { error, data } = await fn;
+  if (error) { setMsg(error.message, 'err'); return; }
+  if (signupMode && !data.session) { setMsg('Check your email to confirm, then sign in.', 'ok'); return; }
+  // onAuthStateChange handles the transition
+});
+document.querySelectorAll('.signout').forEach(b => b.addEventListener('click', () => sb.auth.signOut()));
+
+sb.auth.onAuthStateChange((_event, session) => {
+  if (session) { routeToOverview(); }
+  else { show('login'); }
+});
+
+// ---------- overview ----------
+async function routeToOverview() {
+  show('overview');
+  const { data: { user } } = await sb.auth.getUser();
+  $('overview-sub').textContent = user?.email || 'travel archive';
+  const { data: trips, error } = await sb
+    .from('trips')
+    .select('*')
+    .order('start_date', { ascending: false });
+  const list = $('trips-list');
+  if (error) { list.innerHTML = `<p class="empty-note">${esc(error.message)}</p>`; return; }
+  if (!trips.length) { list.innerHTML = `<p class="empty-note">No trips yet.</p>`; return; }
+  list.innerHTML = trips.map(t => {
+    const st = (t.status || 'upcoming').toLowerCase();
+    const dates = t.start_date
+      ? `${fmtDateY(t.start_date)} – ${fmtDateY(t.end_date)}`
+      : '';
+    return `<div class="trip-card" data-trip="${t.id}">
+      <div class="tc-top">
+        <div>
+          <div class="tc-name">${esc(t.name)}</div>
+          <div class="tc-dest">${esc(t.destination || '')}</div>
+        </div>
+        <span class="status-pill status-${esc(st)}">${esc(st)}</span>
+      </div>
+      <div class="tc-dates">${esc(dates)}</div>
+    </div>`;
+  }).join('');
+  list.querySelectorAll('.trip-card').forEach(c =>
+    c.addEventListener('click', () => openTrip(c.dataset.trip)));
+}
+
+// ---------- trip detail ----------
+$('back-btn').addEventListener('click', routeToOverview);
+document.querySelectorAll('.tab').forEach(tab => {
+  tab.addEventListener('click', () => {
+    const name = tab.dataset.tab;
+    document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t === tab));
+    document.querySelectorAll('#detail .panel').forEach(p => p.classList.remove('active'));
+    $('panel-' + name).classList.add('active');
+  });
+});
+
+async function openTrip(tripId) {
+  show('detail');
+  // reset panels to Trip tab
+  document.querySelectorAll('.tab').forEach((t, i) => t.classList.toggle('active', i === 0));
+  document.querySelectorAll('#detail .panel').forEach((p, i) => p.classList.toggle('active', i === 0));
+
+  const [{ data: trip }, { data: stays }, { data: transport }, { data: user }] = await Promise.all([
+    sb.from('trips').select('*').eq('id', tripId).single(),
+    sb.from('stays').select('*').eq('trip_id', tripId).order('start_date', { ascending: true }),
+    sb.from('transport').select('*').eq('trip_id', tripId).order('departure', { ascending: true }),
+    sb.auth.getUser(),
+  ]);
+  const { data: docs } = await sb
+    .from('travel_docs')
+    .select('*')
+    .eq('user_id', user.user.id);
+
+  $('detail-name').textContent = trip?.name || 'Trip';
+  $('detail-sub').textContent = trip
+    ? `${(trip.destination || '').toLowerCase()} · ${fmtDate(trip.start_date)} – ${fmtDate(trip.end_date)}`.trim()
+    : '';
+
+  renderEsta(trip);
+  renderTimeline(stays || [], transport || []);
+  renderStays(stays || []);
+  renderTransport(transport || []);
+  renderVisa(docs || [], trip);
+}
+
+function renderEsta(trip) {
+  const d = $('esta-days'), b = $('esta-bar');
+  d.className = 'esta-days'; b.className = 'esta-bar';
+  const days = nights(trip?.start_date, trip?.end_date);
+  if (days == null) { d.textContent = '–'; b.style.width = '0%'; return; }
+  d.textContent = days;
+  const pct = Math.min((days / 90) * 100, 100);
+  b.style.width = pct + '%';
+  if (days >= 90) { d.classList.add('danger'); b.classList.add('danger'); }
+  else if (days >= 75) { d.classList.add('warn'); b.classList.add('warn'); }
+}
+
+const dotClass = (type) => ({ flight: 'flight', bus: 'bus', train: 'train' }[type] || 'stay');
+const pillClass = (type) => ({ flight: 'pill-flight', bus: 'pill-bus', train: 'pill-train' }[type] || 'pill-stay');
+
+function renderTimeline(stays, transport) {
+  const items = [
+    ...transport.map(t => ({ kind: 'transport', when: t.departure, data: t })),
+    ...stays.map(s => ({ kind: 'stay', when: s.start_date, data: s })),
+  ].filter(i => i.when)
+   .sort((a, b) => new Date(a.when) - new Date(b.when));
+
+  const tl = $('timeline');
+  tl.innerHTML = '<div class="tl-line"></div>';
+  if (!items.length) { tl.innerHTML += '<p class="empty-note">Nothing scheduled.</p>'; return; }
+
+  items.forEach((item, idx) => {
+    const delay = (0.05 + idx * 0.03).toFixed(2);
+    if (item.kind === 'transport') {
+      const t = item.data;
+      const type = (t.type || '').toLowerCase();
+      const rows = [
+        t.booking_code && `<div class="detail-row"><span class="detail-label">Booking</span><span class="detail-value" style="display:flex;align-items:center;gap:6px">${esc(t.booking_code)} <button class="copy-btn" onclick="event.stopPropagation();copyText('${esc(String(t.booking_code).replace(/\s/g,''))}',this)">copy</button></span></div>`,
+        t.carrier && `<div class="detail-row"><span class="detail-label">Carrier</span><span class="detail-value">${esc(t.carrier)}</span></div>`,
+        t.arrival && `<div class="detail-row"><span class="detail-label">Arrives</span><span class="detail-value">${esc(fmtDT(t.arrival))}</span></div>`,
+        t.price != null && `<div class="detail-row"><span class="detail-label">Price</span><span class="detail-value">${esc(t.price)}</span></div>`,
+        t.notes && `<div class="detail-row"><span class="detail-label">Notes</span><span class="detail-value">${esc(t.notes)}</span></div>`,
+      ].filter(Boolean).join('');
+      tl.insertAdjacentHTML('beforeend', `
+        <div class="tl-item" style="animation-delay:${delay}s">
+          <div class="tl-dot-wrap"><div class="tl-dot ${dotClass(type)}"></div></div>
+          <div class="tl-card" onclick="toggleCard(this)">
+            <div class="tl-card-header">
+              <span class="tl-type-pill ${pillClass(type)}">${esc(t.type || 'travel')}</span>
+              <span class="tl-date">${esc(fmtDT(t.departure))}</span>
+            </div>
+            <div class="tl-title">${esc(t.origin || '')} → ${esc(t.destination || '')}</div>
+            <div class="tl-sub">${esc(t.carrier || '')}</div>
+            <div class="tl-details">${rows || '<div class="detail-row"><span class="detail-label">No extra detail</span><span class="detail-value"></span></div>'}</div>
+          </div>
+        </div>`);
+    } else {
+      const s = item.data;
+      const n = nights(s.start_date, s.end_date);
+      const rows = [
+        s.host_name && `<div class="detail-row"><span class="detail-label">Host</span><span class="detail-value">${esc(s.host_name)}</span></div>`,
+        s.address && `<div class="detail-row"><span class="detail-label">Address</span><span class="detail-value"><a href="https://maps.google.com/?q=${encodeURIComponent(s.address)}" target="_blank">${esc(s.address)} ↗</a></span></div>`,
+        s.pets && `<div class="detail-row"><span class="detail-label">Pets</span><span class="detail-value">${esc(s.pets)}</span></div>`,
+        s.notes && `<div class="detail-row"><span class="detail-label">Notes</span><span class="detail-value">${esc(s.notes)}</span></div>`,
+      ].filter(Boolean).join('');
+      tl.insertAdjacentHTML('beforeend', `
+        <div class="tl-item" style="animation-delay:${delay}s">
+          <div class="tl-dot-wrap"><div class="tl-dot stay"></div></div>
+          <div class="tl-card" onclick="toggleCard(this)">
+            <div class="tl-card-header">
+              <span class="tl-type-pill pill-stay">${esc(s.type || 'stay')}</span>
+              <span class="tl-date">${esc(fmtDate(s.start_date))} – ${esc(fmtDate(s.end_date))}</span>
+            </div>
+            <div class="tl-title">${esc(s.city || '')}</div>
+            <div class="tl-sub">${n != null ? n + ' night' + (n === 1 ? '' : 's') : ''}${s.host_name ? ' · ' + esc(s.host_name) : ''}</div>
+            <div class="tl-details">${rows || '<div class="detail-row"><span class="detail-label">No extra detail</span><span class="detail-value"></span></div>'}</div>
+          </div>
+        </div>`);
+    }
+  });
+}
+
+function renderStays(stays) {
+  const el = $('stays-list');
+  if (!stays.length) { el.innerHTML = '<p class="empty-note">No stays.</p>'; return; }
+  el.innerHTML = stays.map(s => {
+    const n = nights(s.start_date, s.end_date);
+    const rows = [
+      s.host_name && `<div class="detail-row"><span class="detail-label">Host</span><span class="detail-value">${esc(s.host_name)}</span></div>`,
+      `<div class="detail-row"><span class="detail-label">Dates</span><span class="detail-value">${esc(fmtDateY(s.start_date))} – ${esc(fmtDateY(s.end_date))}</span></div>`,
+      s.address && `<div class="detail-row"><span class="detail-label">Address</span><span class="detail-value"><a href="https://maps.google.com/?q=${encodeURIComponent(s.address)}" target="_blank">${esc(s.address)} ↗</a></span></div>`,
+      s.pets && `<div class="detail-row"><span class="detail-label">Pets</span><span class="detail-value">${esc(s.pets)}</span></div>`,
+      s.notes && `<div class="detail-row"><span class="detail-label">Notes</span><span class="detail-value">${esc(s.notes)}</span></div>`,
+    ].filter(Boolean).join('');
+    return `<div class="info-card" onclick="toggleCard(this)">
+      <div class="ic-header">
+        <div><div class="ic-city">${esc(s.city || '')}</div><div class="ic-dates">${esc(fmtDate(s.start_date))} – ${esc(fmtDate(s.end_date))}${n != null ? ' · ' + n + ' night' + (n === 1 ? '' : 's') : ''}</div></div>
+        <span class="ic-tag">${esc(s.type || 'stay')}</span>
+      </div>
+      <div class="ic-details">${rows}</div>
+    </div>`;
+  }).join('');
+}
+
+function renderTransport(transport) {
+  const el = $('transport-list');
+  if (!transport.length) { el.innerHTML = '<p class="empty-note">No transport.</p>'; return; }
+  const icon = (t) => ({ flight: '✈', bus: '🚌', train: '🚆' }[t] || '•');
+  el.innerHTML = transport.map(t => {
+    const rows = [
+      t.booking_code && `<div class="detail-row"><span class="detail-label">Booking</span><span class="detail-value" style="display:flex;align-items:center;gap:6px">${esc(t.booking_code)} <button class="copy-btn" onclick="event.stopPropagation();copyText('${esc(String(t.booking_code).replace(/\s/g,''))}',this)">copy</button></span></div>`,
+      t.carrier && `<div class="detail-row"><span class="detail-label">Carrier</span><span class="detail-value">${esc(t.carrier)}</span></div>`,
+      `<div class="detail-row"><span class="detail-label">Departs</span><span class="detail-value">${esc(fmtDT(t.departure))}</span></div>`,
+      t.arrival && `<div class="detail-row"><span class="detail-label">Arrives</span><span class="detail-value">${esc(fmtDT(t.arrival))}</span></div>`,
+      t.price != null && `<div class="detail-row"><span class="detail-label">Price</span><span class="detail-value">${esc(t.price)}</span></div>`,
+      t.notes && `<div class="detail-row"><span class="detail-label">Notes</span><span class="detail-value">${esc(t.notes)}</span></div>`,
+    ].filter(Boolean).join('');
+    return `<div class="info-card" onclick="toggleCard(this)">
+      <div class="ic-header">
+        <div><div class="ic-city">${esc(t.origin || '')} → ${esc(t.destination || '')}</div><div class="ic-dates">${esc(fmtDT(t.departure))}${t.carrier ? ' · ' + esc(t.carrier) : ''}</div></div>
+        <span class="ic-tag">${icon((t.type || '').toLowerCase())}</span>
+      </div>
+      <div class="ic-details">${rows}</div>
+    </div>`;
+  }).join('');
+}
+
+function renderVisa(docs, trip) {
+  const el = $('visa-list');
+  if (!docs.length) { el.innerHTML = '<p class="empty-note">No travel documents.</p>'; return; }
+  const days = nights(trip?.start_date, trip?.end_date);
+  el.innerHTML = docs.map(d => {
+    const rows = [
+      d.status && `<div class="detail-row"><span class="detail-label">Status</span><span class="detail-value">${esc(d.status)}</span></div>`,
+      d.expires_on && `<div class="detail-row"><span class="detail-label">Expires</span><span class="detail-value">${esc(fmtDateY(d.expires_on))}</span></div>`,
+      d.reference_number && `<div class="detail-row"><span class="detail-label">Reference</span><span class="detail-value" style="display:flex;align-items:center;gap:6px;font-family:'DM Mono',monospace">${esc(d.reference_number)} <button class="copy-btn" onclick="event.stopPropagation();copyText('${esc(d.reference_number)}',this)">copy</button></span></div>`,
+      d.doc_type === 'ESTA' && days != null && `<div class="detail-row"><span class="detail-label">This trip</span><span class="detail-value">${days} days used</span></div>`,
+      d.notes && `<div class="detail-row"><span class="detail-label">Notes</span><span class="detail-value">${esc(d.notes)}</span></div>`,
+    ].filter(Boolean).join('');
+    return `<div class="info-card" onclick="toggleCard(this)">
+      <div class="ic-header">
+        <div><div class="ic-city">${esc(d.doc_type || 'Document')}</div><div class="ic-dates">${esc(d.country || '')}</div></div>
+        <span class="ic-tag">${esc(d.status || '')}</span>
+      </div>
+      <div class="ic-details">${rows}</div>
+    </div>`;
+  }).join('');
+}
+
+// ---------- boot ----------
+(async () => {
+  const { data: { session } } = await sb.auth.getSession();
+  if (session) routeToOverview();
+  else show('login');
+})();
+</script>
+</body>
+</html>
