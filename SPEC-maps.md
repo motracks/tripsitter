@@ -122,24 +122,49 @@ async function geoForStay(stay, tripPlaceTags):
 
 ## 3. Global globe view
 
-### 3a. Entry point
+### 3a. Entry point — DECIDED: live globe.gl on the overview
 
-On the overview, replace nothing — **add** a compact globe widget above the
-trip list (or as a header element): a small auto-rotating globe canvas, ~120px,
-showing dots for all visited places. Tapping it opens the full Map view.
+The overview shows a **live, rotating globe.gl instance** (~280px tall, full
+card width) above the trip list, with stay points for all trips. It auto-loads
+globe.gl on the overview (accepted cost: ~250 ms added first-paint, a standing
+low-power render loop while the overview is visible — paused when it isn't).
+Tapping the globe opens the full-screen `#map` view (same globe instance grows
+to fill the screen, or a fresh full instance) with arcs, heatmap, filters, and
+click-through.
+
+Mitigations for the standing cost:
+- `globe.pauseAnimation()` whenever the overview is not the visible view
+  (navigating into a trip, the map, onboarding, or the tab losing focus via
+  `visibilitychange`).
+- Low renderer settings on small screens (`powerPreference: 'low-power'`,
+  `antialias:false` under ~480px width, capped `devicePixelRatio` at 1.5).
+- `autoRotateSpeed` low (~0.35) so it's a slow drift, not a fast spin.
+- The globe script + Earth texture are cached after first load; subsequent
+  overview visits pay only the render-loop cost.
+- If globe.gl fails to load or WebGL is unavailable → the overview shows the
+  2D fallback (§3f) as a static strip, and the app is otherwise unaffected.
 
 New view id `#map` (peer of `#login` / `#onboarding` / `#overview` / `#detail`).
 `show('map')` added to the `show()` list. Back button → `routeToOverview()`.
 
-### 3b. Library
+### 3b. Library — DECIDED: vendored, not CDN
 
-**`globe.gl`** (single UMD script, ~150 KB, wraps three.js which it bundles).
-Loaded via dynamic `import()` / injected `<script>` only inside `openMap()`.
-Fallback if the CDN/script fails: show the 2D fallback (§3f).
+Vendor `globe.gl` (UMD build, three.js bundled in, ~150 KB min / ~45 KB gzip)
+into **`vendor/globe.gl.min.js`**, committed to the repo. Referenced with a
+local `<script>` injected on first need. Rationale: no external script
+dependency, works offline (needed for the PWA on the roadmap), consistent with
+the app's self-contained ethos, no CSP host to whitelist later. Cost accepted:
+~150 KB in the repo, manual version bumps (rare, fine).
 
-CSP note: the deployed site is a plain static page (no artifact CSP), so a
-`<script src>` to the globe.gl CDN is allowed. If we ever want zero external
-scripts, vendor the file into `/vendor/globe.gl.min.js` and commit it.
+`scripts/update-globe.sh` — re-download the pinned version, commit.
+
+### 3b-note. Weight budget
+
+Lazy-loaded map assets (only fetched when a map surface first appears):
+`vendor/globe.gl.min.js` ~45 KB gz, `data/world-110m.json` ~35 KB gz,
+`data/airports.json` ~120 KB gz. ~200 KB gz total, none on the login/onboarding
+path. globe.gl is on the *overview* path (see 3a) — the rest are deferred to
+the Trip tab / Map view.
 
 ### 3c. Layers
 
@@ -206,9 +231,17 @@ trip's visited places.
    plot points + a route polyline. Full control, no key, no external calls,
    works offline. Slightly more code; looks clean in the app's dark theme.
 
-**Recommendation: option 2** (bundled GeoJSON + canvas). It matches the
-"static picture" ask, has no third-party dependency or key, themes perfectly,
-and the same canvas renderer doubles as the globe's 2D fallback (§3f).
+**DECIDED: option 2** — bundled GeoJSON + `<canvas>`. No key, no external
+calls, themes perfectly in dark, doubles as the globe's 2D fallback (§3f),
+works offline. Neighbourhood detail isn't needed ("get where you are" is the
+bar) so the lack of streets/labels is fine.
+
+**Kept swappable:** all rendering lives in ONE function —
+`renderTripMap(canvasOrImgEl, { points, legs, bbox })`. Switching to a
+static-map provider later = rewrite only that function (build a URL, set an
+`<img src>`) + add a key env var. ~1 hour, nothing else changes. The upstream
+(geo resolution, bbox + outlier logic, which points to include) is
+provider-agnostic.
 
 ### 4c. Interaction
 
@@ -255,7 +288,9 @@ Stay form and Transport form each get a **Location** section:
 | `schema.sql` | + lat/lng/geo_source columns on stays & transport (idempotent) |
 | `data/airports.json` | new — IATA → coords, bundled |
 | `data/world-110m.json` | new — country outlines for the canvas maps |
+| `vendor/globe.gl.min.js` | new — vendored globe library (three.js bundled) |
 | `scripts/update-airports.sh` | new — refetch OurAirports, filter, commit |
+| `scripts/update-globe.sh` | new — re-download the pinned globe.gl build |
 | `api/geocode.js` | new — Nominatim proxy, cached |
 | `index.html` | `#map` view, globe widget on overview, mini-map on Trip tab, Location section in stay/transport forms, geo resolver logic, click-through helpers, lazy globe loader |
 | `ROADMAP.md` | mark maps as in progress |
@@ -281,17 +316,19 @@ Each commit is independently deployable and testable.
 
 ---
 
-## 9. Open questions to resolve before coding
+## 9. Decisions (resolved)
 
-- **Static-map for mini-map: bundled canvas (no key) vs. a provider (prettier,
-  needs key).** Spec recommends bundled canvas.
-- **Globe library: globe.gl from CDN vs. vendored into the repo.** Vendored =
-  no external script, larger repo. CDN = simpler, one more external dependency.
-- **Overview globe widget: always visible small globe, or just a "Map" button?**
-  A live mini-globe is the "wow" but costs a WebGL context on the overview.
-  Compromise: a static globe *image* on the overview that animates to the live
-  one on tap.
-- **How much geocoding traffic?** Nominatim's free endpoint is rate-limited and
+- **Mini-map**: bundled canvas + `data/world-110m.json`, no key. Rendering
+  isolated in `renderTripMap()` so a provider swap later is ~1 hour. ✅
+- **Globe library**: vendored (`vendor/globe.gl.min.js`), not CDN. Offline-
+  capable, no external script, no CSP host. ✅
+- **Overview globe**: full live globe.gl instance on the overview, points only,
+  slow auto-rotate, render loop paused when the overview isn't visible. Tap →
+  full `#map` view. ✅
+
+## 9b. Still-open / accept-as-is
+
+- **Geocoding traffic.** Nominatim's free endpoint is rate-limited and
   usage-policy-bound. For personal single-user scale it's fine; if it ever grows
   we'd move to a keyed provider (Geoapify/MapTiler/LocationIQ) — the
   `api/geocode.js` swap is trivial.
