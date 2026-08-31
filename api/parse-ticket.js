@@ -34,7 +34,8 @@ const SCHEMAS = {
   reference_number.`,
 };
 
-const MODELS = ['gemini-2.0-flash', 'gemini-1.5-flash'];
+// Tried in order; first that responds wins. Current flash-tier vision models.
+const MODELS = ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-flash-latest'];
 
 async function readBody(req) {
   if (req.body && typeof req.body === 'object') return req.body;
@@ -46,19 +47,30 @@ async function readBody(req) {
 }
 
 export default async function handler(req, res) {
-  // GET → debug: report which env vars are visible (never the values)
+  const key = (process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || '').trim();
+
+  // GET → debug. ?models lists what the key can actually use.
   if (req.method === 'GET') {
+    if ('models' in (req.query || {}) && key) {
+      try {
+        const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${encodeURIComponent(key)}&pageSize=100`);
+        const j = await r.json();
+        const names = (j.models || [])
+          .filter(m => (m.supportedGenerationMethods || []).includes('generateContent'))
+          .map(m => m.name.replace('models/', ''));
+        return res.status(r.status).json({ generateContent_models: names });
+      } catch (e) { return res.status(500).json({ error: String(e) }); }
+    }
     const seen = Object.keys(process.env).filter(k => /GEMINI|GOOGLE|GENAI|AI_?STUDIO/i.test(k));
     return res.status(200).json({
       ok: true,
       has_GEMINI_API_KEY: !!process.env.GEMINI_API_KEY,
       has_GOOGLE_API_KEY: !!process.env.GOOGLE_API_KEY,
       matching_env_var_names: seen,
-      total_env_vars: Object.keys(process.env).length,
+      tried_models: MODELS,
     });
   }
   if (req.method !== 'POST') return res.status(405).json({ error: 'method not allowed' });
-  const key = (process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || '').trim();
   if (!key) return res.status(501).json({ error: 'parsing not configured', detail: 'GEMINI_API_KEY not set' });
 
   try {
