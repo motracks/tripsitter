@@ -213,8 +213,13 @@
   .attach-box { border: 0.5px dashed var(--border2); border-radius: 8px; padding: 12px; text-align: center;
     font-family: 'DM Mono', monospace; font-size: 11px; color: var(--muted); cursor: pointer; }
   .attach-box:hover { border-color: var(--green); color: var(--text); }
-  .attach-preview img { max-width: 100%; border-radius: 8px; margin-top: 8px; background: #fff; padding: 4px; }
-  .attach-thumb { max-width: 140px; border-radius: 8px; background: #fff; padding: 4px; margin-top: 4px; }
+  .attach-thumb { max-width: 120px; max-height: 120px; border-radius: 8px; background: #fff; padding: 4px; }
+  .attach-gallery { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+  .attach-chip { display: inline-flex; align-items: center; gap: 6px; background: var(--surface2);
+    border: 0.5px solid var(--border2); border-radius: 99px; padding: 4px 6px 4px 10px;
+    font-family: 'DM Mono', monospace; font-size: 10px; color: var(--muted); }
+  .attach-chip .x { background: none; border: 0; color: var(--muted); cursor: pointer; font-size: 13px; line-height: 1; padding: 0 2px; }
+  .attach-chip .x:hover { color: var(--red); }
   .parse-note { font-size: 10px; color: var(--amber); font-family: 'DM Mono', monospace; margin-top: 6px; }
 
   /* ONBOARDING / SETTINGS */
@@ -957,23 +962,27 @@ async function openTrip(tripId) {
   refreshTotals();
 }
 
-// Attachment: a placeholder row that hydrateAttachments() fills with a
-// signed-URL <img> after render (signing is async).
-function attachmentRow(path) {
-  if (!path) return '';
+// Attachment: placeholders that hydrateAttachments() fills with signed-URL
+// <img>s after render. Accepts the row's attachment_paths[] (or legacy
+// single attachment_path).
+function attachmentRow(row) {
+  const paths = Array.isArray(row?.attachment_paths) ? row.attachment_paths
+    : (row?.attachment_path ? [row.attachment_path] : []);
+  if (!paths.length) return '';
   return `<div class="detail-row" style="flex-direction:column;align-items:stretch">
-    <span class="detail-label">Attachment</span>
-    <span class="detail-value" style="text-align:left"><span class="attach-slot" data-path="${esc(path)}">loading…</span></span>
+    <span class="detail-label">Attachments</span>
+    <span class="detail-value" style="text-align:left">
+      <span class="attach-gallery">${paths.map(p => `<span class="attach-slot" data-path="${esc(p)}">loading…</span>`).join('')}</span>
+    </span>
   </div>`;
 }
 async function hydrateAttachments(container) {
   const slots = container.querySelectorAll('.attach-slot[data-path]');
   for (const slot of slots) {
-    const path = slot.dataset.path;
-    const { data } = await sb.storage.from('tickets').createSignedUrl(path, 3600);
+    const { data } = await sb.storage.from('tickets').createSignedUrl(slot.dataset.path, 3600);
     slot.outerHTML = data?.signedUrl
-      ? `<img class="attach-thumb" src="${data.signedUrl}" alt="attachment">`
-      : 'image unavailable';
+      ? `<a href="${data.signedUrl}" target="_blank" rel="noopener"><img class="attach-thumb" src="${data.signedUrl}" alt="attachment"></a>`
+      : '<span class="attach-chip">image unavailable</span>';
   }
 }
 
@@ -1093,10 +1102,41 @@ const VISA_PORTAL = {
   'IN|e-visa': 'https://indianvisaonline.gov.in/evisa/',
   'EG|e-visa': 'https://visa2egypt.gov.eg/',
   'TR|e-visa': 'https://www.evisa.gov.tr/',
+  'KE|eta': 'https://www.etakenya.go.ke/',
   'KE|e-visa': 'https://www.etakenya.go.ke/',
   'VN|e-visa': 'https://evisa.gov.vn/',
   'LK|eta': 'https://eta.gov.lk/',
-  'ID|e-visa': 'https://molina.imigrasi.go.id/',
+  'ID|e-visa': 'https://evisa.imigrasi.go.id/',
+  'TH|e-visa': 'https://www.thaievisa.go.th/',
+  'AE|e-visa': 'https://www.smartservices.icp.gov.ae/',
+  'SA|e-visa': 'https://visa.visitsaudi.com/',
+  'QA|eta': 'https://www.visitqatar.com/intl-en/practical-info/visas-and-entry',
+  'OM|e-visa': 'https://evisa.rop.gov.om/',
+  'BH|e-visa': 'https://www.evisa.gov.bh/',
+  'JO|e-visa': 'https://www.jordanevisa.gov.jo/',
+  'AZ|e-visa': 'https://evisa.gov.az/',
+  'GE|e-visa': 'https://www.evisa.gov.ge/',
+  'UZ|e-visa': 'https://e-visa.gov.uz/',
+  'KH|e-visa': 'https://www.evisa.gov.kh/',
+  'MM|e-visa': 'https://evisa.moip.gov.mm/',
+  'PK|e-visa': 'https://visa.nadra.gov.pk/',
+  'NP|visa on arrival': 'https://nepaliport.immigration.gov.np/',
+  'ET|e-visa': 'https://www.evisa.gov.et/',
+  'TZ|e-visa': 'https://eservices.immigration.go.tz/visa/',
+  'UG|e-visa': 'https://visas.immigration.go.ug/',
+  'RW|e-visa': 'https://irembo.gov.rw/',
+  'ZM|e-visa': 'https://eservices.zambiaimmigration.gov.zm/',
+  'NG|e-visa': 'https://portal.immigration.gov.ng/',
+  'GH|e-visa': 'https://eservices.gis.gov.gh/',
+  'BJ|e-visa': 'https://evisa.gouv.bj/',
+  'CI|e-visa': 'https://snedai.com/e-visa-ci/',
+  'BR|e-visa': 'https://www.gov.br/mre/pt-br/vistos',
+  'RU|e-visa': 'https://evisa.kdmid.ru/',
+  'CN|visa required': 'https://www.visaforchina.cn/',
+  'US|visa required': 'https://travel.state.gov/content/travel/en/us-visas.html',
+  'CA|visa required': 'https://www.canada.ca/en/immigration-refugees-citizenship/services/visit-canada.html',
+  'AU|visa required': 'https://immi.homeaffairs.gov.au/visas/getting-a-visa/visa-listing/visitor-600',
+  'GB|visa required': 'https://www.gov.uk/standard-visitor',
 };
 function visaPortal(cc, status, citizenName) {
   const known = VISA_PORTAL[`${cc}|${status}`];
@@ -1214,7 +1254,7 @@ function renderTimeline(stays, transport) {
         t.arrival && `<div class="detail-row"><span class="detail-label">Arrives</span><span class="detail-value">${esc(fmtDT(t.arrival))}</span></div>`,
         t.price != null && `<div class="detail-row"><span class="detail-label">Price</span><span class="detail-value">${Number(t.price) === 0 ? 'free' : fmtMoney(t.price, t.currency)}</span></div>`,
         t.notes && `<div class="detail-row"><span class="detail-label">Notes</span><span class="detail-value">${esc(t.notes)}</span></div>`,
-        attachmentRow(t.attachment_path),
+        attachmentRow(t),
       ].filter(Boolean).join('');
       tl.insertAdjacentHTML('beforeend', `
         <div class="tl-item" style="animation-delay:${delay}s">
@@ -1240,7 +1280,7 @@ function renderTimeline(stays, transport) {
         s.pets && `<div class="detail-row"><span class="detail-label">Pets</span><span class="detail-value">${esc(s.pets)}</span></div>`,
         s.price != null && `<div class="detail-row"><span class="detail-label">Price</span><span class="detail-value">${Number(s.price) === 0 ? 'unpaid' : fmtMoney(s.price, s.currency)}</span></div>`,
         s.notes && `<div class="detail-row"><span class="detail-label">Notes</span><span class="detail-value">${esc(s.notes)}</span></div>`,
-        attachmentRow(s.attachment_path),
+        attachmentRow(s),
       ].filter(Boolean).join('');
       tl.insertAdjacentHTML('beforeend', `
         <div class="tl-item" style="animation-delay:${delay}s">
@@ -1274,7 +1314,7 @@ function renderStays(stays) {
       s.pets && `<div class="detail-row"><span class="detail-label">Pets</span><span class="detail-value">${esc(s.pets)}</span></div>`,
       s.price != null && `<div class="detail-row"><span class="detail-label">Price</span><span class="detail-value" style="display:flex;align-items:center;gap:8px">${Number(s.price) === 0 ? 'unpaid' : money(Number(s.price))} ${currencyPicker(s.currency || 'EUR', 'setStayCurrency', s.id)}</span></div>`,
       s.notes && `<div class="detail-row"><span class="detail-label">Notes</span><span class="detail-value">${esc(s.notes)}</span></div>`,
-      attachmentRow(s.attachment_path),
+      attachmentRow(s),
     ].filter(Boolean).join('');
     return `<div class="info-card" onclick="toggleCard(this)">
       <div class="ic-header">
@@ -1301,7 +1341,7 @@ function renderTransport(transport) {
       t.arrival && `<div class="detail-row"><span class="detail-label">Arrives</span><span class="detail-value">${esc(fmtDT(t.arrival))}</span></div>`,
       t.price != null && `<div class="detail-row"><span class="detail-label">Price</span><span class="detail-value" style="display:flex;align-items:center;gap:8px">${Number(t.price) === 0 ? 'free' : money(Number(t.price))} ${currencyPicker(t.currency || 'EUR', 'setTransportCurrency', t.id)}</span></div>`,
       t.notes && `<div class="detail-row"><span class="detail-label">Notes</span><span class="detail-value">${esc(t.notes)}</span></div>`,
-      attachmentRow(t.attachment_path),
+      attachmentRow(t),
     ].filter(Boolean).join('');
     return `<div class="info-card" onclick="toggleCard(this)">
       <div class="ic-header">
@@ -1377,7 +1417,7 @@ async function renderVisa(docs, trip) {
       d.reference_number && `<div class="detail-row"><span class="detail-label">Reference</span><span class="detail-value" style="display:flex;align-items:center;gap:6px;font-family:'DM Mono',monospace">${esc(d.reference_number)} <button class="copy-btn" onclick="event.stopPropagation();copyText('${esc(d.reference_number)}',this)">copy</button></span></div>`,
       d.doc_type === 'ESTA' && days != null && `<div class="detail-row"><span class="detail-label">This trip</span><span class="detail-value">${days} days used</span></div>`,
       d.notes && `<div class="detail-row"><span class="detail-label">Notes</span><span class="detail-value">${esc(d.notes)}</span></div>`,
-      attachmentRow(d.attachment_path),
+      attachmentRow(d),
     ].filter(Boolean).join('');
     return `<div class="info-card" onclick="toggleCard(this)">
       <div class="ic-header">
@@ -1548,15 +1588,14 @@ function openForm(opts) {
       : fieldHTML(g[0], values[g[0].key])
   ).join('');
 
+  const existingImgs = Array.isArray(values.attachment_paths) ? values.attachment_paths
+    : (values.attachment_path ? [values.attachment_path] : []);
   const attachBlock = attach ? `
     <div class="field">
-      <label>Ticket / QR / document image</label>
-      <div class="attach-box" id="attach-trigger">${values.attachment_path ? 'replace image' : 'upload an image — fields auto-fill from it'}</div>
-      <input type="file" id="attach-input" accept="image/*" class="hidden">
-      <div class="attach-preview" id="attach-preview"></div>
-      <label style="flex-direction:row;gap:6px;align-items:center;margin-top:6px;text-transform:none">
-        <input type="checkbox" id="attach-keep" style="width:auto" ${attach.defaultKeep ? 'checked' : ''}> keep the image after parsing
-      </label>
+      <label>Tickets / QR codes / documents</label>
+      <div class="attach-box" id="attach-trigger">add image(s) — the first one auto-fills the fields</div>
+      <input type="file" id="attach-input" accept="image/*" multiple class="hidden">
+      <div class="attach-gallery" id="attach-gallery"></div>
       <div class="parse-note hidden" id="attach-parsenote"></div>
     </div>` : '';
 
@@ -1613,35 +1652,69 @@ function openForm(opts) {
     return data;
   };
 
-  let pendingFile = null;
+  // Attachment state: keptPaths (already in storage), newFiles (to upload),
+  // removedPaths (existing ones the user deleted).
+  let keptPaths = existingImgs.slice();
+  let newFiles = [];
+  let removedPaths = [];
+
+  function renderGallery() {
+    if (!attach) return;
+    const g = $('attach-gallery');
+    const chip = (label, onRemove) =>
+      `<span class="attach-chip">${esc(label)}<button type="button" class="x">×</button></span>`;
+    g.innerHTML =
+      keptPaths.map((p, i) => `<span class="attach-chip" data-kept="${i}">saved image ${i + 1}<button type="button" class="x">×</button></span>`).join('') +
+      newFiles.map((f, i) => `<span class="attach-chip" data-new="${i}">${esc(f.name.slice(0, 24))}<button type="button" class="x">×</button></span>`).join('');
+    g.querySelectorAll('[data-kept] .x').forEach((b, i) => b.onclick = () => {
+      removedPaths.push(keptPaths[i]); keptPaths.splice(i, 1); renderGallery();
+    });
+    g.querySelectorAll('[data-new] .x').forEach((b, i) => b.onclick = () => {
+      newFiles.splice(i, 1); renderGallery();
+    });
+  }
+
   if (attach) {
+    renderGallery();
     $('attach-trigger').onclick = () => $('attach-input').click();
     $('attach-input').onchange = async () => {
-      const file = $('attach-input').files[0];
-      if (!file) return;
-      pendingFile = file;
-      $('attach-preview').innerHTML = `<img src="${URL.createObjectURL(file)}">`;
-      $('attach-parsenote').classList.remove('hidden');
-      $('attach-parsenote').textContent = 'reading image…';
-      try {
-        const parsed = await parseTicket(file, attach.kind);
-        if (parsed && Object.keys(parsed).length) {
-          for (const [k, val] of Object.entries(parsed)) {
-            const el = $('modal').querySelector(`[data-key="${k}"]`);
-            if (el && val != null && val !== '') {
-              if (el.type === 'datetime-local') el.value = new Date(val).toISOString().slice(0, 16);
-              else if (el.type === 'date') el.value = String(val).slice(0, 10);
-              else el.value = val;
-            }
-          }
-          $('attach-parsenote').textContent = 'fields filled from image — check them before saving';
-        } else {
-          $('attach-parsenote').textContent = 'could not read fields — enter them manually';
+      const picked = [...$('attach-input').files];
+      if (!picked.length) return;
+      const firstEver = newFiles.length === 0 && keptPaths.length === 0;
+      newFiles.push(...picked);
+      $('attach-input').value = '';
+      renderGallery();
+
+      // Parse only the very first image added, to pre-fill the form.
+      if (firstEver) {
+        $('attach-parsenote').classList.remove('hidden');
+        $('attach-parsenote').textContent = 'reading image…';
+        try {
+          const parsed = await parseTicket(picked[0], attach.kind);
+          const filled = fillFormFromParsed(parsed);
+          $('attach-parsenote').textContent = filled
+            ? 'fields filled from image — check them before saving'
+            : 'could not read fields — enter them manually';
+        } catch (err) {
+          $('attach-parsenote').textContent = 'parsing unavailable (' + (err.message || 'error') + ') — enter fields manually';
         }
-      } catch (err) {
-        $('attach-parsenote').textContent = 'parsing unavailable — enter fields manually';
       }
     };
+  }
+
+  function fillFormFromParsed(parsed) {
+    if (!parsed || typeof parsed !== 'object' || !Object.keys(parsed).length) return false;
+    let any = false;
+    for (const [k, val] of Object.entries(parsed)) {
+      const el = $('modal').querySelector(`[data-key="${k}"]`);
+      if (!el || val == null || val === '') continue;
+      if (el.type === 'datetime-local') el.value = new Date(val).toISOString().slice(0, 16);
+      else if (el.type === 'date') el.value = String(val).slice(0, 10);
+      else el.value = val;
+      any = true;
+      el.dispatchEvent(new Event('change'));
+    }
+    return any;
   }
 
   $('modal-form').onsubmit = async (e) => {
@@ -1650,22 +1723,27 @@ function openForm(opts) {
     $('modal-msg').textContent = '';
     try {
       const data = readForm();
-      const keepImage = attach ? $('attach-keep')?.checked : false;
+      if (attach) {
+        data.attachment_paths = keptPaths.slice();   // will append uploads below
+        delete data.attachment_path;                 // legacy single column
+      }
       const saved = await onSave(data);
-      if (attach && pendingFile && keepImage) {
+      if (attach) {
         const rowId = saved?.id || attach.rowId;
         let folder = attach.folder;
         if (attach.userFolder) {
           const { data: { user } } = await sb.auth.getUser();
           folder = `user/${user.id}`;
         }
-        const path = `${folder}/${rowId}/${Date.now()}_${pendingFile.name.replace(/[^\w.-]/g, '_')}`;
-        const up = await sb.storage.from('tickets').upload(path, pendingFile, { upsert: true });
-        if (!up.error) await sb.from(attach.table).update({ attachment_path: path }).eq('id', rowId);
-      } else if (attach && pendingFile && !keepImage && attach.rowId && values.attachment_path) {
-        // user unchecked keep on an existing image → remove it
-        await sb.storage.from('tickets').remove([values.attachment_path]);
-        await sb.from(attach.table).update({ attachment_path: null }).eq('id', attach.rowId);
+        const uploaded = [];
+        for (const f of newFiles) {
+          const path = `${folder}/${rowId}/${Date.now()}_${Math.random().toString(36).slice(2, 7)}_${f.name.replace(/[^\w.-]/g, '_')}`;
+          const up = await sb.storage.from('tickets').upload(path, f, { upsert: true });
+          if (!up.error) uploaded.push(path);
+        }
+        if (removedPaths.length) await sb.storage.from('tickets').remove(removedPaths);
+        const finalPaths = [...keptPaths, ...uploaded];
+        await sb.from(attach.table).update({ attachment_paths: finalPaths }).eq('id', rowId);
       }
       closeModal();
       if (opts.after) await opts.after();
@@ -1696,8 +1774,12 @@ async function parseTicket(file, kind) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ image: b64, mime: file.type, kind }),
   });
-  if (!res.ok) throw new Error('parse failed');
-  return await res.json();
+  const j = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    const d = j.detail ? (typeof j.detail === 'string' ? j.detail : JSON.stringify(j.detail)) : '';
+    throw new Error((j.error || 'parse failed') + (d ? ': ' + d.slice(0, 120) : ''));
+  }
+  return j;
 }
 
 // ---------- CRUD: entity field specs + handlers ----------
@@ -1782,7 +1864,7 @@ function editTrip() {
     },
     onDelete: async () => {
       // wipe storage objects for this trip, then the row (cascade handles children)
-      const paths = [...currentStays, ...currentTransport].map(r => r.attachment_path).filter(Boolean);
+      const paths = [...currentStays, ...currentTransport].flatMap(r => r.attachment_paths || (r.attachment_path ? [r.attachment_path] : []));
       if (paths.length) await sb.storage.from('tickets').remove(paths);
       const { error } = await sb.from('trips').delete().eq('id', currentTrip.id);
       if (error) throw error;
@@ -1803,14 +1885,14 @@ function stayForm(row) {
   openForm({
     title: editing ? 'Edit stay' : 'Add stay', fields: STAY_FIELDS,
     values,
-    attach: { table: 'stays', folder: currentTrip.id, rowId: row?.id, kind: 'stay', defaultKeep: false },
+    attach: { table: 'stays', folder: currentTrip.id, rowId: row?.id, kind: 'stay' },
     onSave: async (d) => {
       if (editing) { const { error } = await sb.from('stays').update(d).eq('id', row.id); if (error) throw error; return row; }
       const { data, error } = await sb.from('stays').insert({ ...d, trip_id: currentTrip.id }).select().single();
       if (error) throw error; return data;
     },
     onDelete: editing ? async () => {
-      if (row.attachment_path) await sb.storage.from('tickets').remove([row.attachment_path]);
+      const _p = row.attachment_paths || (row.attachment_path ? [row.attachment_path] : []); if (_p.length) await sb.storage.from("tickets").remove(_p);
       const { error } = await sb.from('stays').delete().eq('id', row.id); if (error) throw error;
     } : null,
     after: () => openTrip(currentTrip.id),
@@ -1821,14 +1903,14 @@ function transportForm(row) {
   openForm({
     title: editing ? 'Edit transport' : 'Add transport', fields: TRANSPORT_FIELDS,
     values: row || { type: 'flight', currency: currentTrip?.base_currency || 'EUR' },
-    attach: { table: 'transport', folder: currentTrip.id, rowId: row?.id, kind: 'transport', defaultKeep: true },
+    attach: { table: 'transport', folder: currentTrip.id, rowId: row?.id, kind: 'transport' },
     onSave: async (d) => {
       if (editing) { const { error } = await sb.from('transport').update(d).eq('id', row.id); if (error) throw error; return row; }
       const { data, error } = await sb.from('transport').insert({ ...d, trip_id: currentTrip.id }).select().single();
       if (error) throw error; return data;
     },
     onDelete: editing ? async () => {
-      if (row.attachment_path) await sb.storage.from('tickets').remove([row.attachment_path]);
+      const _p = row.attachment_paths || (row.attachment_path ? [row.attachment_path] : []); if (_p.length) await sb.storage.from("tickets").remove(_p);
       const { error } = await sb.from('transport').delete().eq('id', row.id); if (error) throw error;
     } : null,
     after: () => openTrip(currentTrip.id),
@@ -1839,7 +1921,7 @@ function docForm(row) {
   openForm({
     title: editing ? 'Edit document' : 'Add document', fields: DOC_FIELDS,
     values: row || {},
-    attach: { table: 'travel_docs', folder: 'user', rowId: row?.id, kind: 'doc', defaultKeep: false, userFolder: true },
+    attach: { table: 'travel_docs', folder: 'user', rowId: row?.id, kind: 'doc', userFolder: true },
     onSave: async (d) => {
       const { data: { user } } = await sb.auth.getUser();
       if (editing) { const { error } = await sb.from('travel_docs').update(d).eq('id', row.id); if (error) throw error; return row; }
@@ -1847,7 +1929,7 @@ function docForm(row) {
       if (error) throw error; return data;
     },
     onDelete: editing ? async () => {
-      if (row.attachment_path) await sb.storage.from('tickets').remove([row.attachment_path]);
+      const _p = row.attachment_paths || (row.attachment_path ? [row.attachment_path] : []); if (_p.length) await sb.storage.from("tickets").remove(_p);
       const { error } = await sb.from('travel_docs').delete().eq('id', row.id); if (error) throw error;
     } : null,
     after: () => openTrip(currentTrip.id),

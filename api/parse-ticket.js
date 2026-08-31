@@ -8,6 +8,8 @@
 // those are visible on the ticket. (Google's consumer AI Studio tier may use
 // submitted data to improve their products; a paid API tier does not.)
 
+export const config = { api: { bodyParser: { sizeLimit: '10mb' } } };
+
 const SCHEMAS = {
   transport: `Extract these keys where readable (omit any you cannot read):
   type ("flight" | "bus" | "train" | "ferry" | "car"),
@@ -19,7 +21,7 @@ const SCHEMAS = {
   booking_code (PNR / booking reference / ticket number),
   price (number only), currency (ISO 4217 code).`,
   stay: `Extract these keys where readable (omit any you cannot read):
-  type ("hotel" | "hostel" | "airbnb" | "other"),
+  type ("hotel" | "hostel" | "airbnb" | "retreat" | "course" | "other"),
   city,
   start_date (ISO date, check-in),
   end_date (ISO date, check-out),
@@ -34,16 +36,26 @@ const SCHEMAS = {
   reference_number.`,
 };
 
-const MODEL = 'gemini-2.0-flash';
+const MODELS = ['gemini-2.0-flash', 'gemini-1.5-flash'];
+
+async function readBody(req) {
+  if (req.body && typeof req.body === 'object') return req.body;
+  if (typeof req.body === 'string') { try { return JSON.parse(req.body); } catch { return {}; } }
+  // stream fallback
+  const chunks = [];
+  for await (const c of req) chunks.push(c);
+  try { return JSON.parse(Buffer.concat(chunks).toString('utf8')); } catch { return {}; }
+}
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'method not allowed' });
   const key = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY;
-  if (!key) return res.status(501).json({ error: 'parsing not configured' });
+  if (!key) return res.status(501).json({ error: 'parsing not configured', detail: 'GEMINI_API_KEY not set' });
 
   try {
-    const { image, mime, kind } = req.body || {};
-    if (!image || !SCHEMAS[kind]) return res.status(400).json({ error: 'bad request' });
+    const { image, mime, kind } = await readBody(req);
+    if (!image) return res.status(400).json({ error: 'bad request', detail: 'no image' });
+    if (!SCHEMAS[kind]) return res.status(400).json({ error: 'bad request', detail: 'unknown kind: ' + kind });
 
     const sys =
       'You extract travel logistics from a photo of a ticket, booking confirmation, ' +
@@ -51,41 +63,46 @@ export default async function handler(req, res) {
       'Do NOT extract passenger names, passport numbers, dates of birth, or frequent-flyer ' +
       'numbers even if visible. If a field is unreadable, omit its key.';
 
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent?key=${encodeURIComponent(key)}`;
-    const gres = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        systemInstruction: { parts: [{ text: sys }] },
-        contents: [{
-          role: 'user',
-          parts: [
-            { inline_data: { mime_type: mime || 'image/jpeg', data: image } },
-            { text: SCHEMAS[kind] },
-          ],
-        }],
-        generationConfig: { temperature: 0, responseMimeType: 'application/json', maxOutputTokens: 1024 },
-      }),
-    });
+    const payload = {
+      systemInstruction: { parts: [{ text: sys }] },
+      contents: [{
+        role: 'user',
+        parts: [
+          { inline_data: { mime_type: mime || 'image/jpeg', data: image } },
+          { text: SCHEMAS[kind] },
+        ],
+      }],
+      generationConfig: { temperature: 0, responseMimeType: 'application/json', maxOutputTokens: 1024 },
+    };
 
-    if (!gres.ok) {
-      console.error('parse-ticket: gemini', gres.status);
-      return res.status(502).json({ error: 'parse failed' });
+    let lastErr = null;
+    for (const model of MODELS) {
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(key)}`;
+      const gres = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      if (!gres.ok) {
+        lastErr = { status: gres.status, body: (await gres.text()).slice(0, 300) };
+        console.error('parse-ticket: gemini', model, gres.status, lastErr.body);
+        continue;
+      }
+      const j = await gres.json();
+      const text = (j?.candidates?.[0]?.content?.parts || []).map((p) => p.text || '').join('');
+      let parsed = {};
+      try {
+        parsed = JSON.parse(text.replace(/^```(?:json)?\s*|\s*```$/g, '').trim());
+      } catch {
+        const m = text.match(/\{[\s\S]*\}/);
+        if (m) { try { parsed = JSON.parse(m[0]); } catch {} }
+      }
+      if (parsed && typeof parsed === 'object') { delete parsed.name; delete parsed.passenger; }
+      return res.status(200).json(parsed || {});
     }
-    const j = await gres.json();
-    const text = (j?.candidates?.[0]?.content?.parts || []).map((p) => p.text || '').join('');
-
-    let parsed = {};
-    try {
-      parsed = JSON.parse(text.replace(/^```(?:json)?\s*|\s*```$/g, '').trim());
-    } catch {
-      const m = text.match(/\{[\s\S]*\}/);
-      if (m) { try { parsed = JSON.parse(m[0]); } catch {} }
-    }
-    if (parsed && typeof parsed === 'object') { delete parsed.name; delete parsed.passenger; }
-    return res.status(200).json(parsed || {});
+    return res.status(502).json({ error: 'gemini error', detail: lastErr });
   } catch (err) {
-    console.error('parse-ticket:', err?.message || 'error');
-    return res.status(500).json({ error: 'parse failed' });
+    console.error('parse-ticket:', err?.message || err);
+    return res.status(500).json({ error: 'parse failed', detail: String(err?.message || err) });
   }
 }

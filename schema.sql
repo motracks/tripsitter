@@ -71,10 +71,19 @@ create table if not exists travel_docs (
 );
 
 -- Attachments (ticket / QR / doc scans) live in the private `tickets`
--- storage bucket; the row holds the object path only.
+-- storage bucket; the row holds the object paths only. attachment_paths is
+-- the current column (multiple images); attachment_path is the legacy
+-- single-value column, still read as a fallback.
 alter table stays       add column if not exists attachment_path text;
 alter table transport   add column if not exists attachment_path text;
 alter table travel_docs add column if not exists attachment_path text;
+alter table stays       add column if not exists attachment_paths text[] default '{}';
+alter table transport   add column if not exists attachment_paths text[] default '{}';
+alter table travel_docs add column if not exists attachment_paths text[] default '{}';
+-- migrate any existing single paths into the array
+update stays       set attachment_paths = array[attachment_path] where attachment_path is not null and coalesce(array_length(attachment_paths,1),0) = 0;
+update transport   set attachment_paths = array[attachment_path] where attachment_path is not null and coalesce(array_length(attachment_paths,1),0) = 0;
+update travel_docs set attachment_paths = array[attachment_path] where attachment_path is not null and coalesce(array_length(attachment_paths,1),0) = 0;
 
 -- Trip membership — future-proofs multi-user. The trip owner is always a
 -- member (see trigger below). `scope` is null for full-trip access, or a
