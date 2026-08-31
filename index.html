@@ -87,6 +87,15 @@
 
   /* TIMELINE */
   .timeline { position: relative; }
+  .trip-map { position: relative; width: 100%; aspect-ratio: 16 / 9; max-height: 220px;
+    border: 0.5px solid var(--border2); border-radius: var(--r); overflow: hidden;
+    background: var(--surface); margin-bottom: 1rem; cursor: pointer; }
+  .trip-map canvas { display: block; width: 100%; height: 100%; }
+  .trip-map:hover { border-color: var(--green); }
+  .trip-map::after { content: 'open map'; position: absolute; right: 8px; bottom: 6px;
+    font-family: 'DM Mono', monospace; font-size: 9px; text-transform: uppercase;
+    letter-spacing: 0.1em; color: var(--muted); background: var(--bg);
+    padding: 2px 6px; border-radius: 6px; pointer-events: none; }
   .tl-line { position: absolute; left: 19px; top: 8px; bottom: 8px; width: 1px; background: var(--border2); }
   .tl-item { display: flex; gap: 14px; margin-bottom: 10px; animation: fadeUp 0.3s ease both; }
   .tl-dot-wrap { flex-shrink: 0; width: 38px; display: flex; flex-direction: column; align-items: center; padding-top: 14px; }
@@ -399,6 +408,9 @@
       <button class="btn btn-ghost btn-sm" id="edit-trip-btn">edit trip</button>
       <button class="btn btn-green btn-sm" id="add-transport-btn">+ transport</button>
       <button class="btn btn-green btn-sm" id="add-stay-btn">+ stay</button>
+    </div>
+    <div class="trip-map hidden" id="trip-map" role="button" tabindex="0" aria-label="Open the map for this trip">
+      <canvas id="trip-map-canvas"></canvas>
     </div>
     <p class="section-label">Full timeline</p>
     <div class="timeline" id="timeline"><div class="tl-line"></div></div>
@@ -747,39 +759,207 @@ async function geoForStay(stay, placeTags) {
   return null;
 }
 
-// Fire-and-forget: resolve a stay's coords after save and write them back.
-// Never runs over a manual pin. Errors are swallowed.
+// Fire-and-forget wrappers for the save path — resolve coords after an
+// insert/update, write them back, swallow errors. Never run over a manual pin.
+// (The await-able variants live further down, next to the backfill pass.)
 function resolveStayGeo(row) {
-  if (!row || !row.id || row.geo_source === 'manual') return;
-  (async () => {
-    try {
-      const g = await geoForStay(row, currentTrip?.place_tags);
-      if (!g) return;
-      row.lat = g.lat; row.lng = g.lng; row.geo_source = g.source;
-      await sb.from('stays').update({ lat: g.lat, lng: g.lng, geo_source: g.source }).eq('id', row.id);
-    } catch { /* ignore */ }
-  })();
+  resolveStayGeoAwait(row).catch(() => {}).then(() => renderTripMapForCurrentTrip());
+}
+function resolveTransportGeo(row) {
+  resolveTransportGeoAwait(row).catch(() => {}).then(() => renderTripMapForCurrentTrip());
 }
 
-// Fire-and-forget: resolve both transport endpoints after save and write back.
-function resolveTransportGeo(row) {
-  if (!row || !row.id || row.geo_source === 'manual') return;
-  (async () => {
-    try {
-      const mode = (row.type || 'flight').toLowerCase();
-      const [o, d] = await Promise.all([
-        geoForTransportEnd(row.origin, mode),
-        geoForTransportEnd(row.destination, mode),
-      ]);
-      const patch = {};
-      if (o) { patch.origin_lat = o.lat; patch.origin_lng = o.lng; }
-      if (d) { patch.dest_lat = d.lat; patch.dest_lng = d.lng; }
-      if (!Object.keys(patch).length) return;
-      patch.geo_source = (o && d) ? (o.source === 'iata' || d.source === 'iata' ? 'iata' : o.source) : 'partial';
-      Object.assign(row, patch);
-      await sb.from('transport').update(patch).eq('id', row.id);
-    } catch { /* ignore */ }
-  })();
+// ---------- canvas maps (per-trip mini-map; also the globe's 2D fallback) ----------
+// One renderer for everything map-shaped: bundled country outlines + stay dots
+// + transport polylines, drawn on a <canvas> in an equirectangular projection.
+// Swapping to a static-map provider later = rewrite only renderTripMap().
+let worldGeo = null, worldGeoPromise = null;
+function loadWorldGeo() {
+  if (worldGeo) return Promise.resolve(worldGeo);
+  if (!worldGeoPromise) {
+    worldGeoPromise = fetch('data/world-110m.json')
+      .then(r => r.ok ? r.json() : null)
+      .catch(() => null)
+      .then(j => (worldGeo = j));
+  }
+  return worldGeoPromise;
+}
+
+// bbox: {minLat,maxLat,minLng,maxLng}. Fits [minLng,maxLng]x[minLat,maxLat]
+// into the canvas, letterboxed, no distortion beyond the equirectangular one.
+function renderTripMap(canvas, { points = [], legs = [], bbox }) {
+  if (!canvas || !bbox || !worldGeo) return;
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  const cssW = canvas.clientWidth || 320, cssH = canvas.clientHeight || 180;
+  canvas.width = cssW * dpr; canvas.height = cssH * dpr;
+  const ctx = canvas.getContext('2d');
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, cssW, cssH);
+
+  const styles = getComputedStyle(document.documentElement);
+  const col = (n, f) => (styles.getPropertyValue(n).trim() || f);
+  const landFill = col('--surface2', '#1e2220');
+  const landStroke = col('--border2', 'rgba(255,255,255,0.12)');
+  const dotCol = col('--green', '#4ade9a');
+  const legCols = { flight: col('--blue', '#60aaff'), bus: col('--green', '#4ade9a'),
+    train: col('--amber', '#f5c542'), car: col('--muted', '#888'),
+    ferry: col('--muted', '#888'), other: col('--muted', '#888') };
+
+  // fit: same scale on both axes so shapes aren't stretched
+  const lngSpan = Math.max(bbox.maxLng - bbox.minLng, 0.05);
+  const latSpan = Math.max(bbox.maxLat - bbox.minLat, 0.05);
+  const scale = Math.min(cssW / lngSpan, cssH / latSpan);
+  const offX = (cssW - lngSpan * scale) / 2;
+  const offY = (cssH - latSpan * scale) / 2;
+  const px = (lng) => offX + (lng - bbox.minLng) * scale;
+  const py = (lat) => offY + (bbox.maxLat - lat) * scale;
+
+  // land
+  ctx.fillStyle = landFill; ctx.strokeStyle = landStroke; ctx.lineWidth = 0.5;
+  const drawRing = (ring) => {
+    ctx.beginPath();
+    ring.forEach(([lng, lat], i) => { const x = px(lng), y = py(lat);
+      i ? ctx.lineTo(x, y) : ctx.moveTo(x, y); });
+    ctx.closePath(); ctx.fill(); ctx.stroke();
+  };
+  for (const f of worldGeo.features) {
+    const g = f.geometry; if (!g) continue;
+    const polys = g.type === 'Polygon' ? [g.coordinates]
+      : g.type === 'MultiPolygon' ? g.coordinates : [];
+    for (const poly of polys) for (const ring of poly) drawRing(ring);
+  }
+
+  // transport legs
+  ctx.lineWidth = 1.5; ctx.lineCap = 'round';
+  for (const leg of legs) {
+    if (leg.o == null || leg.d == null) continue;
+    ctx.strokeStyle = legCols[leg.mode] || legCols.other;
+    ctx.beginPath();
+    ctx.moveTo(px(leg.o.lng), py(leg.o.lat));
+    ctx.lineTo(px(leg.d.lng), py(leg.d.lat));
+    ctx.stroke();
+  }
+
+  // stay dots
+  for (const p of points) {
+    const x = px(p.lng), y = py(p.lat);
+    ctx.beginPath(); ctx.arc(x, y, 4, 0, Math.PI * 2);
+    ctx.fillStyle = dotCol; ctx.fill();
+    ctx.strokeStyle = col('--bg', '#0d0f0e'); ctx.lineWidth = 1.5; ctx.stroke();
+  }
+}
+
+// Collect a trip's resolved coords, drop far-flung transport ends (the FRA end
+// of a FRA->JFK flight on a US road trip), and return points + legs + bbox.
+function tripMapData(stays, transport) {
+  const stayPts = (stays || [])
+    .filter(s => s.lat != null && s.lng != null)
+    .map(s => ({ lat: s.lat, lng: s.lng, id: s.id, label: s.city }));
+
+  const legs = (transport || []).map(t => ({
+    id: t.id, mode: (t.type || 'other').toLowerCase(),
+    o: t.origin_lat != null ? { lat: t.origin_lat, lng: t.origin_lng } : null,
+    d: t.dest_lat != null ? { lat: t.dest_lat, lng: t.dest_lng } : null,
+  }));
+
+  // median of stay points (fallback: all transport ends) as the trip's centre
+  const core = stayPts.length ? stayPts
+    : legs.flatMap(l => [l.o, l.d].filter(Boolean));
+  if (!core.length) return null;
+  const med = (arr, k) => { const v = arr.map(p => p[k]).sort((a, b) => a - b);
+    return v[Math.floor(v.length / 2)]; };
+  const cLat = med(core, 'lat'), cLng = med(core, 'lng');
+  const far = (p) => {
+    const dLat = (p.lat - cLat) * 111;
+    const dLng = (p.lng - cLng) * 111 * Math.cos(cLat * Math.PI / 180);
+    return Math.hypot(dLat, dLng) > 1500; // km
+  };
+
+  const pts = [...stayPts];
+  for (const l of legs) {
+    // keep the destination end always; drop a far origin
+    if (l.o && far(l.o)) l.o = null;
+    if (l.d && far(l.d) && stayPts.length) l.d = null;
+    if (l.o) pts.push(l.o);
+    if (l.d) pts.push(l.d);
+  }
+  if (!pts.length) return null;
+
+  let minLat = 90, maxLat = -90, minLng = 180, maxLng = -180;
+  for (const p of pts) {
+    minLat = Math.min(minLat, p.lat); maxLat = Math.max(maxLat, p.lat);
+    minLng = Math.min(minLng, p.lng); maxLng = Math.max(maxLng, p.lng);
+  }
+  // pad ~15%, and enforce a minimum span so a single-city trip isn't a pinpoint
+  const padLat = Math.max((maxLat - minLat) * 0.15, 1.5);
+  const padLng = Math.max((maxLng - minLng) * 0.15, 1.5);
+  const bbox = { minLat: minLat - padLat, maxLat: maxLat + padLat,
+    minLng: minLng - padLng, maxLng: maxLng + padLng };
+  return { points: stayPts, legs, bbox };
+}
+
+// Resolve any null coords for the open trip's rows, write them back, then
+// re-render the mini-map. Throttled; runs once per Trip-tab open.
+let tripGeoBackfilling = false;
+async function backfillTripGeo() {
+  if (tripGeoBackfilling || !currentTrip) return;
+  tripGeoBackfilling = true;
+  try {
+    const jobs = [];
+    for (const s of currentStays) {
+      if (s.lat == null && (s.address || s.city) && s.geo_source !== 'manual')
+        jobs.push(() => resolveStayGeoAwait(s));
+    }
+    for (const t of currentTransport) {
+      const needsO = t.origin_lat == null && t.origin;
+      const needsD = t.dest_lat == null && t.destination;
+      if ((needsO || needsD) && t.geo_source !== 'manual')
+        jobs.push(() => resolveTransportGeoAwait(t));
+    }
+    // max ~4 concurrent
+    const queue = jobs.slice();
+    const workers = Array.from({ length: 4 }, async () => {
+      while (queue.length) { const job = queue.shift(); try { await job(); } catch {} }
+    });
+    await Promise.all(workers);
+  } finally {
+    tripGeoBackfilling = false;
+  }
+  renderTripMapForCurrentTrip();
+}
+
+// await-able variants of the fire-and-forget resolvers (for the backfill pass)
+async function resolveStayGeoAwait(row) {
+  if (!row?.id || row.geo_source === 'manual') return;
+  const g = await geoForStay(row, currentTrip?.place_tags);
+  if (!g) return;
+  row.lat = g.lat; row.lng = g.lng; row.geo_source = g.source;
+  await sb.from('stays').update({ lat: g.lat, lng: g.lng, geo_source: g.source }).eq('id', row.id);
+}
+async function resolveTransportGeoAwait(row) {
+  if (!row?.id || row.geo_source === 'manual') return;
+  const mode = (row.type || 'flight').toLowerCase();
+  const [o, d] = await Promise.all([
+    geoForTransportEnd(row.origin, mode),
+    geoForTransportEnd(row.destination, mode),
+  ]);
+  const patch = {};
+  if (o) { patch.origin_lat = o.lat; patch.origin_lng = o.lng; }
+  if (d) { patch.dest_lat = d.lat; patch.dest_lng = d.lng; }
+  if (!Object.keys(patch).length) return;
+  patch.geo_source = (o && d) ? (o.source === 'iata' || d.source === 'iata' ? 'iata' : o.source) : 'partial';
+  Object.assign(row, patch);
+  await sb.from('transport').update(patch).eq('id', row.id);
+}
+
+async function renderTripMapForCurrentTrip() {
+  const wrap = $('trip-map');
+  const data = tripMapData(currentStays, currentTransport);
+  if (!data) { wrap.classList.add('hidden'); return; }
+  await loadWorldGeo();
+  if (!worldGeo) { wrap.classList.add('hidden'); return; }
+  wrap.classList.remove('hidden');
+  renderTripMap($('trip-map-canvas'), data);
 }
 
 // Ensure a stay/transport row has amount_base in the trip's base currency,
@@ -1187,6 +1367,8 @@ async function openTrip(tripId) {
 
   renderVisaHeader(trip);
   renderTimeline(currentStays, currentTransport);
+  renderTripMapForCurrentTrip();
+  backfillTripGeo();
   renderStays(currentStays);
   renderTransport(currentTransport);
   renderVisa(docs || [], trip);
@@ -2279,6 +2461,20 @@ $('add-stay-btn-2').addEventListener('click', () => stayForm());
 $('add-transport-btn').addEventListener('click', () => transportForm());
 $('add-transport-btn-2').addEventListener('click', () => transportForm());
 $('add-doc-btn').addEventListener('click', () => docForm());
+
+// Mini-map → full Map view (the #map view lands in a later commit; until then
+// this is a no-op placeholder so the tap target is wired end to end).
+window.openMap = window.openMap || function (opts) { /* #map view — later commit */ void opts; };
+const _tripMapEl = $('trip-map');
+const _openTripMap = () => { if (currentTrip) window.openMap({ focusTripId: currentTrip.id }); };
+_tripMapEl.addEventListener('click', _openTripMap);
+_tripMapEl.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); _openTripMap(); } });
+// Re-fit the canvas on resize/orientation change while a trip is open.
+let _mapResizeT = null;
+window.addEventListener('resize', () => {
+  clearTimeout(_mapResizeT);
+  _mapResizeT = setTimeout(() => { if (currentTrip && !$('trip-map').classList.contains('hidden')) renderTripMapForCurrentTrip(); }, 200);
+});
 
 (async () => {
   let session = null;
