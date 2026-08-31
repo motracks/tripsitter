@@ -992,11 +992,11 @@ async function refreshTotals() {
 
   $('transport-total').innerHTML = `<div class="total-bar">
     <span class="tb-label">Total transport</span>
-    <div class="tb-value">${fmtMoney(c.transportTotal, base)}</div>
+    <div class="tb-value">${fmtMoney(c.transportTotal, base)} ${currencyPicker(base, 'setTripCurrency')}</div>
   </div>`;
   $('stays-total').innerHTML = `<div class="total-bar">
     <span class="tb-label">Total stays</span>
-    <div class="tb-value">${fmtMoney(c.staysTotal, base)}</div>
+    <div class="tb-value">${fmtMoney(c.staysTotal, base)} ${currencyPicker(base, 'setTripCurrency')}</div>
   </div>`;
   $('trip-total').innerHTML = `<div class="total-bar total-expand" onclick="toggleCard(this)">
     <span class="tb-label">Trip total</span>
@@ -1061,6 +1061,45 @@ const VISA_LABEL = {
   'e-visa': 'e-Visa required', 'visa required': 'Visa required', 'no admission': 'No admission',
 };
 const VISA_TONE = { 'visa free': 'green', 'visa on arrival': 'green', 'eta': 'amber', 'e-visa': 'amber', 'visa required': 'red', 'no admission': 'red' };
+
+// What each status means + how you obtain it. The dataset only gives
+// status + days; this is the fixed explanation layer.
+const VISA_EXPLAIN = {
+  'visa free': { how: 'No visa or pre-authorisation needed for a tourist stay. Carry a passport valid for the whole trip (many countries want 3–6 months beyond your exit) and proof of onward travel.' },
+  'visa on arrival': { how: 'A visa is issued at the border on arrival — usually a short queue, a fee in cash, and a passport photo. Check the current fee and accepted currency before you fly.' },
+  'eta': { how: 'An Electronic Travel Authorisation — applied for online days before travel, linked to your passport, approved by email. This is the ESTA (USA), eTA (Canada), ETA (Australia), and ETIAS (Europe) family. Apply only on the official government site.' },
+  'e-visa': { how: 'An electronic visa — an online application with documents and a fee, processed in days to weeks, sent as a PDF you print. Apply well before travel, only on the official government portal (many lookalike sites charge extra).' },
+  'visa required': { how: 'A visa must be obtained in advance, usually at an embassy/consulate or an accredited visa centre: an application form, photos, a fee, often proof of funds, accommodation and onward travel, and sometimes an interview. Start 4–8 weeks ahead.' },
+  'no admission': { how: 'Entry is generally not permitted on this passport, or there are exceptional restrictions (sanctions, conflict, closed border). Check official government travel advice before making any plans.' },
+};
+
+// Official application/authority portals per destination, keyed by ISO-2 +
+// status. Falls back to a search when we don't have a known-good URL.
+const VISA_PORTAL = {
+  'US|eta': 'https://esta.cbp.dhs.gov/',
+  'CA|eta': 'https://www.canada.ca/en/immigration-refugees-citizenship/services/visit-canada/eta.html',
+  'AU|eta': 'https://immi.homeaffairs.gov.au/visas/getting-a-visa/visa-listing/electronic-travel-authority-601',
+  'NZ|eta': 'https://www.immigration.govt.nz/new-zealand-visas/apply-for-a-visa/about-visa/nzeta',
+  'GB|eta': 'https://www.gov.uk/eta',
+  'IN|e-visa': 'https://indianvisaonline.gov.in/evisa/',
+  'EG|e-visa': 'https://visa2egypt.gov.eg/',
+  'TR|e-visa': 'https://www.evisa.gov.tr/',
+  'KE|e-visa': 'https://www.etakenya.go.ke/',
+  'VN|e-visa': 'https://evisa.gov.vn/',
+  'LK|eta': 'https://eta.gov.lk/',
+  'ID|e-visa': 'https://molina.imigrasi.go.id/',
+};
+function visaPortal(cc, status, citizenName) {
+  const known = VISA_PORTAL[`${cc}|${status}`];
+  if (known) return { url: known, label: 'official application portal ↗' };
+  // ETIAS covers most of Europe for eta
+  if (status === 'eta' && EU_SCHENGEN.has(cc)) return { url: 'https://travel-europe.europa.eu/etias_en', label: 'ETIAS — official portal ↗' };
+  return {
+    url: 'https://www.google.com/search?q=' + encodeURIComponent(`${COUNTRY_NAME[cc] || cc} ${status === 'e-visa' ? 'e-visa' : status === 'eta' ? 'electronic travel authorisation' : 'visa'} official application ${citizenName} citizens`),
+    label: 'find the official site ↗',
+  };
+}
+const EU_SCHENGEN = new Set(['AT','BE','HR','CZ','DK','EE','FI','FR','DE','GR','HU','IS','IT','LV','LI','LT','LU','MT','NL','NO','PL','PT','SK','SI','ES','SE','CH']);
 
 // Best requirement for one destination across the traveller's passports,
 // with a residency/long-stay permission overriding to "resident".
@@ -1298,14 +1337,24 @@ async function renderVisa(docs, trip) {
               ${tripDays >= v.days ? '<b style="color:var(--red)">exceeds the visa-free limit</b>' : tripDays >= v.days * 0.8 ? '<span style="color:var(--amber)">close to the limit</span>' : 'well within'}
             </div>`;
         }
-        const action = { 'eta': 'Apply for the ETA / ESTA before departure.', 'e-visa': 'Apply for the e-Visa before departure.', 'visa required': 'Apply for a visa at the consulate before travel.', 'no admission': 'Entry may not be permitted — check official guidance.' }[v.status];
-        return `<div class="visa-block">
+        const primaryName = COUNTRY_NAME[primary] || primary;
+        const explain = VISA_EXPLAIN[v.status];
+        const portal = v.status === 'visa free' || v.status === 'visa on arrival'
+          ? null : visaPortal(cc, v.status, primaryName);
+        const passportNote = v.passport && v.passport !== primary
+          ? `<div class="vb-line">Best on your ${flagEmoji(v.passport)} ${esc(COUNTRY_NAME[v.passport])} passport.</div>` : '';
+        return `<div class="visa-block info-card" onclick="toggleCard(this)" style="cursor:pointer">
           <div class="vb-country">${flagEmoji(cc)} ${esc(COUNTRY_NAME[cc] || cc)}
             <span class="visa-badge vb-${v.tone}">${esc(v.label)}</span></div>
-          ${v.viaPermission ? `<div class="vb-line">You hold: ${esc(v.label)} — visa rules may not apply.</div>` : ''}
+          ${v.viaPermission ? `<div class="vb-line">You hold <b>${esc(v.label)}</b> — the visa rules below may not apply to you.</div>` : ''}
+          ${passportNote}
           ${bar}
-          ${action ? `<div class="vb-line">⚠ ${esc(action)}</div>` : ''}
-          <div class="vb-line"><a href="https://www.google.com/search?q=${encodeURIComponent((COUNTRY_NAME[cc] || cc) + ' visa requirements for ' + (COUNTRY_NAME[primary] || primary) + ' citizens official')}" target="_blank">official requirements ↗</a></div>
+          <div class="ic-details">
+            ${explain ? `<div class="vb-line">${esc(explain.how)}</div>` : ''}
+            ${v.days != null ? `<div class="vb-line">Permitted stay on this basis: <b>${v.days} days</b> per entry.</div>` : ''}
+            ${portal ? `<div class="vb-line"><a href="${portal.url}" target="_blank" rel="noopener">${portal.label}</a></div>` : ''}
+            <div class="vb-line"><a href="https://www.google.com/search?q=${encodeURIComponent((COUNTRY_NAME[cc] || cc) + ' entry requirements ' + primaryName + ' citizens official government')}" target="_blank" rel="noopener">full official requirements ↗</a></div>
+          </div>
         </div>`;
       }).join('');
   }
