@@ -19,9 +19,13 @@ Ideas parked for later. Nothing here is committed to; it's a memory aid.
   incl. purpose; images discarded by default (kept for transport)
 - Attachments: multiple per row, thumbnail gallery, signed URLs
 
-## Next up — the map / globe
+## Next up — the map / globe  ← IN PROGRESS
 
-See `## Globe — feasibility` below. This is the headline next feature.
+Full E2E plan: **`SPEC-maps.md`**. Approach settled (Path A):
+CSS/SVG rotating globe on the overview first; full 3D globe.gl only in a
+dedicated `#map` view; per-trip canvas mini-map on each Trip tab. 9 commits,
+detailed in the spec. The `## Globe — feasibility` notes below are superseded
+by SPEC-maps.md but kept for context.
 
 ## Backlog
 

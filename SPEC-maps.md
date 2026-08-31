@@ -1,13 +1,22 @@
 # TripSitter — Maps feature spec (E2E)
 
-Two surfaces, one shared geo layer:
+**Approach: Path A** — cheap CSS/SVG globe on the overview first; the full
+3D globe.gl lives only in the dedicated `#map` view. The overview globe can be
+upgraded to a live globe.gl instance later (~2 h, once §4's globe.gl view
+exists) if the extra polish proves worth the standing cost — decision deferred
+until you've seen the real globe running on your own phone.
 
-1. **Global globe** — a slowly-rotating 3D globe on the trips overview. Own
-   full-screen "Map" view, reached by tapping the globe. Shows every trip's
-   stays as points and every transport leg as an arc; a heatmap of time spent;
-   click a point/arc to jump to that entry in the app.
-2. **Per-trip mini-map** — a small static map on each trip's Trip tab, framed on
-   that trip's tagged/visited places (local hops, not the long-haul flight in).
+Surfaces:
+
+1. **Overview globe (CSS/SVG)** — a slowly-rotating stylised globe on the trips
+   overview, visited countries highlighted. Decorative, ~near-zero cost, no
+   library. Tapping it opens the full Map view.
+2. **Full Map view (`#map`, globe.gl)** — full-screen interactive 3D globe:
+   every trip's stays as points, transport legs as arcs, a heatmap of time
+   spent, click a point/arc to jump to that entry.
+3. **Per-trip mini-map (canvas)** — a small static map on each trip's Trip tab,
+   framed on that trip's visited places (local hops, not the long-haul flight
+   in). Rendered on a `<canvas>` from a bundled world-outline GeoJSON.
 
 ---
 
@@ -24,12 +33,16 @@ Two surfaces, one shared geo layer:
     `geonameId` coords; fall back to the city centroid.
 - **Coords are stored, not recomputed.** Once resolved, `lat`/`lng` live on the
   row. A background pass fills gaps; the user can correct with a pin.
-- **The globe loads lazily** — its library and the airport table are only
-  fetched when the Map view opens, never on the overview's critical path.
-- **The per-trip mini-map is a static image** (a raster map tile snapshot or a
-  lightweight 2D canvas), not the 3D globe — cheap, instant, no rotation.
-- **Both surfaces share** the same geo resolution code and the same
-  click-through routing (`openTrip` + tab/card focus).
+- **globe.gl loads lazily** — the vendored library, the airport table, and the
+  world GeoJSON are fetched only when the `#map` view opens, never on the
+  overview or login path. The overview globe uses no library at all.
+- **The per-trip mini-map is a `<canvas>`** drawn from a bundled world-outline
+  GeoJSON — cheap, instant, no rotation, no external calls, themes in dark.
+- **The overview globe is CSS/SVG** — a sphere with a rotating Earth texture (or
+  simplified continents) + highlighted visited-country regions. ~5–10 KB, one
+  CSS animation.
+- **All surfaces share** the same geo resolution code (§2) and the same
+  click-through routing (`openTrip` + tab/card focus, §6).
 
 ---
 
@@ -120,53 +133,65 @@ async function geoForStay(stay, tripPlaceTags):
 
 ---
 
-## 3. Global globe view
+## 3. Overview globe (CSS/SVG) + full Map view (globe.gl)
 
-### 3a. Entry point — DECIDED: live globe.gl on the overview
+### 3a. Overview globe — DECIDED: CSS/SVG, no library (Path A)
 
-The overview shows a **live, rotating globe.gl instance** (~280px tall, full
-card width) above the trip list, with stay points for all trips. It auto-loads
-globe.gl on the overview (accepted cost: ~250 ms added first-paint, a standing
-low-power render loop while the overview is visible — paused when it isn't).
-Tapping the globe opens the full-screen `#map` view (same globe instance grows
-to fill the screen, or a fresh full instance) with arcs, heatmap, filters, and
-click-through.
+A stylised rotating globe sits in a card at the top of the overview (~260px):
 
-Mitigations for the standing cost:
-- `globe.pauseAnimation()` whenever the overview is not the visible view
-  (navigating into a trip, the map, onboarding, or the tab losing focus via
-  `visibilitychange`).
-- Low renderer settings on small screens (`powerPreference: 'low-power'`,
-  `antialias:false` under ~480px width, capped `devicePixelRatio` at 1.5).
-- `autoRotateSpeed` low (~0.35) so it's a slow drift, not a fast spin.
-- The globe script + Earth texture are cached after first load; subsequent
-  overview visits pay only the render-loop cost.
-- If globe.gl fails to load or WebGL is unavailable → the overview shows the
-  2D fallback (§3f) as a static strip, and the app is otherwise unaffected.
+- An SVG `<circle>` for the sphere; the world drawn from `data/world-110m.json`
+  land polygons projected orthographically onto the sphere, OR a single
+  equirectangular Earth texture wrapped via CSS. Prefer the SVG-land approach —
+  it themes to the app's dark palette and lets us tint visited countries.
+- **Visited countries highlighted**: colour any country whose ISO-2 appears in
+  a place tag across all trips (`overviewTrips.flatMap(t => t.country_codes)`).
+- **Rotation**: one CSS `@keyframes` spinning the land group (or shifting the
+  texture's longitude) — ~60 s per revolution, slow drift. `prefers-reduced-
+  motion` → no spin.
+- Cost: ~5–10 KB of code, one compositor-only CSS animation, negligible CPU/GPU.
+  Loads on the overview with no penalty.
+- The whole card is a button → `openMap()`.
 
-New view id `#map` (peer of `#login` / `#onboarding` / `#overview` / `#detail`).
-`show('map')` added to the `show()` list. Back button → `routeToOverview()`.
+**Upgrade path (deferred):** once §3c's globe.gl `#map` view exists, the
+overview card can host a live globe.gl instance instead (~2 h swap:
+`renderOverviewGlobe()` mounts a globe.gl canvas + a `pauseAnimation()` on
+view-change). The CSS globe then becomes the reduced-motion / no-WebGL
+fallback. Not built now — revisit after seeing the real globe on-device.
 
-### 3b. Library — DECIDED: vendored, not CDN
+### 3b. `renderOverviewGlobe(container, { countryCodes })`
 
-Vendor `globe.gl` (UMD build, three.js bundled in, ~150 KB min / ~45 KB gzip)
-into **`vendor/globe.gl.min.js`**, committed to the repo. Referenced with a
-local `<script>` injected on first need. Rationale: no external script
-dependency, works offline (needed for the PWA on the roadmap), consistent with
-the app's self-contained ethos, no CSP host to whitelist later. Cost accepted:
-~150 KB in the repo, manual version bumps (rare, fine).
+Single entry point for whatever the overview card contains. Called from
+`renderOverview()`. Today: draws the SVG globe. Later: may mount globe.gl.
+Nothing else in the overview knows or cares.
 
-`scripts/update-globe.sh` — re-download the pinned version, commit.
+### 3c. Full Map view — `#map`, globe.gl
 
-### 3b-note. Weight budget
+New view id `#map` (peer of `#login` / `#onboarding` / `#overview` /
+`#detail`). `show('map')` added to the `show()` list. Its own back button →
+`routeToOverview()`. `openMap(opts?)` (see §6) lazy-loads globe.gl on first use.
 
-Lazy-loaded map assets (only fetched when a map surface first appears):
+**Library — DECIDED: vendored, not CDN.** Vendor `globe.gl` (UMD build,
+three.js bundled, ~150 KB min / ~45 KB gz) into **`vendor/globe.gl.min.js`**,
+committed. Injected as a local `<script>` on first `openMap()`. Rationale: no
+external script dependency, offline-capable (PWA on the roadmap), consistent
+with the app's self-contained ethos, no CSP host to whitelist later.
+`scripts/update-globe.sh` re-downloads the pinned version.
+
+**Weight budget** — all deferred, none on the login/overview path:
 `vendor/globe.gl.min.js` ~45 KB gz, `data/world-110m.json` ~35 KB gz,
-`data/airports.json` ~120 KB gz. ~200 KB gz total, none on the login/onboarding
-path. globe.gl is on the *overview* path (see 3a) — the rest are deferred to
-the Trip tab / Map view.
+`data/airports.json` ~120 KB gz. Fetched only when `#map` (globe.gl) or a
+Trip tab (world GeoJSON) first appears.
 
-### 3c. Layers
+**Perf** (globe.gl in `#map`):
+- `globe.pauseAnimation()` when `#map` is not the visible view + on
+  `visibilitychange`.
+- `powerPreference: 'low-power'`, `antialias:false` under ~480px, `devicePixel
+  Ratio` capped at 1.5.
+- `autoRotateSpeed ≈ 0.35`; pauses on pointer-down, resumes ~4 s after.
+- Cap arcs shown at once (~300); require a filter above that.
+- WebGL unavailable / script fails → the 2D fallback (§3f).
+
+### 3d. Layers (globe.gl `#map` view)
 
 | Layer | Data | Encoding |
 |---|---|---|
@@ -175,38 +200,30 @@ the Trip tab / Map view.
 | **Heatmap / rings** | stay coords weighted by nights | `globe.gl` hex-bin layer, or pulsing rings on the most-stayed cities |
 | **Home marker** | `profiles.home_country` centroid (or home_place if resolved) | a distinct static marker |
 
-### 3d. Interaction
+### 3e. Interaction (globe.gl `#map` view)
 
-- `globe.controls().autoRotate = true`, `autoRotateSpeed ≈ 0.3`. Pauses on
+- `globe.controls().autoRotate = true`, `autoRotateSpeed ≈ 0.35`. Pauses on
   pointer-down, resumes ~4 s after the last interaction.
 - Scroll / pinch to zoom; drag to rotate.
-- **Click a point** → `openTrip(tripId)`, then switch to the Stays tab and
-  expand that stay's card (needs a `focusStay(id)` helper — scroll into view +
-  add `.expanded` + open `.ic-details`).
-- **Click an arc** → `openTrip(tripId)`, Transport tab, focus that leg.
+- **Click a point** → `openTrip(tripId)`, then Stays tab, `focusStay(stayId)`
+  (scroll into view + add `.expanded` + open `.ic-details`).
+- **Click an arc** → `openTrip(tripId)`, Transport tab, `focusTransport(legId)`.
 - Hover → tooltip with the place/leg summary.
 - A legend (mode colours, "size = nights") in a corner.
 - Filter chips: All / Upcoming / Ongoing / Past — dims non-matching points/arcs.
 
-### 3e. Performance
+### 3f. Fallback (no WebGL / globe.gl fails to load)
 
-- Cap arcs shown at once (~300); if more, aggregate or require a filter.
-- `rendererConfig: { antialias: true, powerPreference: 'low-power' }` on mobile.
-- Pause the render loop (`globe.pauseAnimation()`) when `#map` isn't visible.
-- Earth texture: use globe.gl's built-in night/day at medium res; don't ship a
-  huge 8k texture.
-- Lazy: nothing globe-related is parsed until `openMap()`.
-
-### 3f. Fallback (no WebGL / script fails)
-
-A flat equirectangular world image with absolutely-positioned dots
-(lat/lng → x/y projection). Same click-through. Not pretty, but functional.
+The `#map` view falls back to the **canvas world map** (§4b `renderTripMap`,
+run in "all trips" mode) — a flat projection with dots for stays and lines for
+legs. Same click-through. Not 3D, but fully functional. This reuses the
+per-trip mini-map renderer at a world bbox.
 
 ---
 
 ## 4. Per-trip mini-map
 
-On the **Trip tab**, above the timeline: a static map image framed on the
+On the **Trip tab**, above the timeline: a static canvas map framed on the
 trip's visited places.
 
 ### 4a. What "framed on visited places" means
@@ -292,27 +309,54 @@ Stay form and Transport form each get a **Location** section:
 | `scripts/update-airports.sh` | new — refetch OurAirports, filter, commit |
 | `scripts/update-globe.sh` | new — re-download the pinned globe.gl build |
 | `api/geocode.js` | new — Nominatim proxy, cached |
-| `index.html` | `#map` view, globe widget on overview, mini-map on Trip tab, Location section in stay/transport forms, geo resolver logic, click-through helpers, lazy globe loader |
+| `index.html` | `#map` view, CSS overview globe, mini-map on Trip tab, Location section in stay/transport forms, geo resolver logic, click-through helpers, lazy globe.gl loader |
 | `ROADMAP.md` | mark maps as in progress |
-| `PRIVACY.md` | note: addresses are sent to Nominatim (OSM) for geocoding; results cached; no third party beyond OSM + the static-map/airport data which is local |
+| `PRIVACY.md` | note: addresses are sent to Nominatim (OSM) for geocoding; results cached; no third party beyond OSM. Airport + world-outline data is bundled/local. |
 
 ---
 
-## 8. Build order (commits)
+## 8. Build order (commits) — Path A
 
-1. **Schema + geo resolver + `api/geocode.js`.** Columns, the client resolver,
-   the proxy. Resolve-on-save wired. No UI yet. Verify rows get coords.
-2. **Bundled data.** `airports.json`, `world-110m.json`, refresh scripts.
-3. **Per-trip mini-map (canvas).** The §4b renderer, bbox+outlier logic, on the
-   Trip tab. This proves the geo data and gives immediate value.
-4. **Global globe — first slice.** `#map` view, lazy globe.gl, **stay points
-   only**, auto-rotate, click point → `openTrip`. The overview globe widget.
-5. **Arcs.** Transport legs as coloured arcs, click-through to the leg.
-6. **Heatmap + home marker + filter chips + legend.**
-7. **Location section in the forms** (manual pin override).
-8. **Perf pass + 2D fallback + PRIVACY/ROADMAP updates.**
+1. **Schema + `api/geocode.js` + geo resolver.** lat/lng/geo_source columns
+   (stays + transport); Nominatim proxy; the client resolver (§2a); resolve-on-
+   save wired into `stayForm` / `transportForm`. No UI. Verify rows get coords
+   in the DB after adding/editing.
+2. **Bundled data.** `data/airports.json` (OurAirports, IATA-only, ~5–6k rows),
+   `data/world-110m.json` (Natural Earth land/countries), `scripts/update-
+   airports.sh`. Airport lookup helper (`extractIATA`, `AIRPORTS[code]`).
+3. **Per-trip mini-map (canvas).** `renderTripMap(el, {points, legs, bbox})` —
+   orthographic/equirectangular projection of `world-110m` land + stay dots +
+   leg polylines. bbox + outlier logic (§4a). Mounted above the timeline on the
+   Trip tab. Backfill missing coords when the Trip tab opens. **Proves the geo
+   data end to end.**
+4. **CSS overview globe.** `renderOverviewGlobe(el, {countryCodes})` — SVG
+   sphere, `world-110m` land projected on it, visited countries tinted, slow CSS
+   rotation, `prefers-reduced-motion` respected. Card on the overview; tap →
+   `openMap()` (stub for now).
+5. **globe.gl `#map` view — first slice.** Vendor `globe.gl.min.js` +
+   `scripts/update-globe.sh`. `#map` view + `show('map')` + back button.
+   `openMap(opts?)` lazy-loads the script. **Stay points only**, auto-rotate,
+   click point → `openTrip` + `focusStay`. `openMap({focusTripId})` flies to a
+   trip's bbox.
+6. **Arcs.** Transport legs as mode-coloured arcs in `#map`; click → `openTrip`
+   + `focusTransport`. Per-trip mini-map gains the leg polylines (if not already
+   from commit 3).
+7. **Heatmap + home marker + filter chips + legend** in `#map`.
+8. **Location section in the forms** (§5) — inline mini-map + manual pin
+   override (`geo_source = 'manual'`).
+9. **Perf pass + fallback wiring + PRIVACY/ROADMAP updates.** globe.gl pause on
+   view-change + `visibilitychange`; WebGL-absent → canvas world map fallback in
+   `#map`; renderer settings by screen size.
 
-Each commit is independently deployable and testable.
+Each commit is independently deployable and testable. Commits 1–4 need no new
+external dependency (Nominatim is a proxied API, already the pattern). globe.gl
+enters at commit 5.
+
+### Deferred (post Path A, optional)
+
+- **Live globe.gl on the overview** — swap `renderOverviewGlobe` to mount a
+  globe.gl instance instead of the SVG; CSS globe becomes the reduced-motion /
+  no-WebGL fallback. ~2 h. Decide after using commit 5 on a real phone.
 
 ---
 
@@ -322,9 +366,13 @@ Each commit is independently deployable and testable.
   isolated in `renderTripMap()` so a provider swap later is ~1 hour. ✅
 - **Globe library**: vendored (`vendor/globe.gl.min.js`), not CDN. Offline-
   capable, no external script, no CSP host. ✅
-- **Overview globe**: full live globe.gl instance on the overview, points only,
-  slow auto-rotate, render loop paused when the overview isn't visible. Tap →
-  full `#map` view. ✅
+- **Overview globe**: **Path A** — CSS/SVG rotating globe first (no library,
+  ~near-zero cost). Upgrade to a live globe.gl instance is deferred and
+  isolated behind `renderOverviewGlobe()`; decide after commit 5. ✅
+- **Sequencing**: build the geo layer + mini-map + CSS globe (commits 1–4,
+  no globe.gl) before touching globe.gl at all (commit 5). This reaches
+  "spinning globe on the overview" fast and defers the heavy/risky part until
+  it can be judged on-device. ✅
 
 ## 9b. Still-open / accept-as-is
 
