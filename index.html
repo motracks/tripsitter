@@ -159,6 +159,16 @@
   .tb-value .cur-picker { font-size: 11px; vertical-align: middle; margin-left: 6px; }
 
   .section-label { font-size: 10px; font-family: 'DM Mono', monospace; color: var(--faint); text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 10px; margin-top: 0.5rem; }
+
+  .trip-section { margin-bottom: 18px; }
+  .section-head { width: 100%; display: flex; justify-content: space-between; align-items: center;
+    background: none; border: 0; padding: 4px 2px 10px; cursor: pointer;
+    font-family: 'DM Mono', monospace; font-size: 11px; color: var(--muted);
+    text-transform: uppercase; letter-spacing: 0.1em; }
+  .section-head:hover { color: var(--text); }
+  .section-head .sh-count { color: var(--faint); margin-left: 4px; }
+  .section-head .sh-caret { font-size: 10px; color: var(--faint); }
+  .section-body { display: flex; flex-direction: column; gap: 10px; }
   .empty-note { font-size: 12px; font-family: 'DM Mono', monospace; color: var(--faint); text-align: center; padding: 2rem 0; }
 
   .copy-btn { font-family: 'DM Mono', monospace; font-size: 10px; color: var(--muted); background: var(--surface2); border: 0.5px solid var(--border2); border-radius: 6px; padding: 2px 7px; cursor: pointer; transition: color 0.15s; }
@@ -534,23 +544,26 @@ const currencyForCountry = (cc) => COUNTRY_CCY[cc] || 'EUR';
 
 // FX rates via frankfurter.app (ECB data, no key). Cached per from|to|date.
 const rateCache = new Map();
+async function fetchJSON(url, ms = 5000) {
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), ms);
+  try {
+    const res = await fetch(url, { signal: ctrl.signal });
+    return res.ok ? await res.json() : null;
+  } catch { return null; }
+  finally { clearTimeout(t); }
+}
 async function getRate(from, to, date) {
   from = from || 'EUR'; to = to || 'EUR';
   if (from === to) return 1;
   const day = (date || new Date().toISOString().slice(0, 10)).slice(0, 10);
   const key = `${from}|${to}|${day}`;
   if (rateCache.has(key)) return rateCache.get(key);
-  let rate = null;
-  try {
-    const res = await fetch(`https://api.frankfurter.app/${day}?from=${from}&to=${to}`);
-    if (res.ok) { const j = await res.json(); rate = j?.rates?.[to] ?? null; }
-  } catch (_) { /* offline — fall through */ }
+  let j = await fetchJSON(`https://api.frankfurter.app/${day}?from=${from}&to=${to}`);
+  let rate = j?.rates?.[to] ?? null;
   if (rate == null) {
-    // last resort: try latest
-    try {
-      const res = await fetch(`https://api.frankfurter.app/latest?from=${from}&to=${to}`);
-      if (res.ok) { const j = await res.json(); rate = j?.rates?.[to] ?? null; }
-    } catch (_) {}
+    j = await fetchJSON(`https://api.frankfurter.app/latest?from=${from}&to=${to}`);
+    rate = j?.rates?.[to] ?? null;
   }
   if (rate != null) rateCache.set(key, rate);
   return rate;
@@ -582,13 +595,21 @@ async function ensureBase(table, row, baseCurrency) {
   await sb.from(table).update({ amount_base: row.amount_base, base_rate_date: day }).eq('id', row.id);
 }
 
-// Convert every row, then return base-currency subtotals.
+// Convert every row, then return base-currency subtotals. A failing FX
+// lookup for one row never blocks the rest or the render.
 async function convertAndSum(stays, transport, baseCurrency) {
-  await Promise.all([
+  await Promise.allSettled([
     ...stays.map(r => ensureBase('stays', r, baseCurrency)),
     ...transport.map(r => ensureBase('transport', r, baseCurrency)),
   ]);
-  const sum = (rows) => rows.reduce((a, r) => a + (Number(r.amount_base) || 0), 0);
+  // amount_base where we have it; else the raw price if it's already in the
+  // base currency; else 0 (an un-convertible foreign amount).
+  const rowVal = (r) => {
+    if (r.amount_base != null) return Number(r.amount_base) || 0;
+    if ((r.currency || 'EUR') === baseCurrency) return Number(r.price) || 0;
+    return 0;
+  };
+  const sum = (rows) => rows.reduce((a, r) => a + rowVal(r), 0);
   const staysTotal = sum(stays), transportTotal = sum(transport);
   return { staysTotal, transportTotal, total: staysTotal + transportTotal };
 }
@@ -781,6 +802,9 @@ async function loadPermissions() {
 $('settings-btn').addEventListener('click', async () => { await loadPermissions(); openOnboarding(true); });
 
 // ---------- overview ----------
+let collapsedSections = new Set();
+try { collapsedSections = new Set(JSON.parse(localStorage.getItem('ts_collapsed') || '[]')); } catch {}
+
 async function routeToOverview() {
   show('overview');
   const { data: { user } } = await sb.auth.getUser();
@@ -803,26 +827,58 @@ async function routeToOverview() {
     chargesByTrip[r.trip_id] = (chargesByTrip[r.trip_id] || 0) + (!Number.isNaN(v) ? v : 0);
   }
 
-  list.innerHTML = trips.map(t => {
-    const st = tripStatus(t);
+  const cardHTML = (t) => {
     const base = t.base_currency || 'EUR';
-    const dates = t.start_date
-      ? `${fmtDateY(t.start_date)} – ${fmtDateY(t.end_date)}`
-      : '';
+    const dates = t.start_date ? `${fmtDateY(t.start_date)} – ${fmtDateY(t.end_date)}` : '';
     return `<div class="trip-card" data-trip="${t.id}">
       <div class="tc-top">
         <div>
           <div class="tc-name">${esc(t.name)}</div>
           ${placeTagsHTML(t.place_tags, t.destination)}
         </div>
-        <span class="status-pill status-${esc(st)}">${esc(st)}</span>
+        <span class="status-pill status-${esc(tripStatus(t))}">${esc(tripStatus(t))}</span>
       </div>
       <div class="tc-dates">${esc(dates)}</div>
       <div class="tc-total">Total ${fmtMoney(chargesByTrip[t.id] || 0, base)}</div>
     </div>`;
-  }).join('');
+  };
+
+  // Group by status; order ongoing → upcoming → done. Within a group,
+  // ongoing/upcoming soonest first, done most-recent first.
+  const groups = { ongoing: [], upcoming: [], done: [] };
+  for (const t of trips) groups[tripStatus(t)]?.push(t);
+  groups.ongoing.sort((a, b) => (a.start_date || '').localeCompare(b.start_date || ''));
+  groups.upcoming.sort((a, b) => (a.start_date || '').localeCompare(b.start_date || ''));
+  groups.done.sort((a, b) => (b.start_date || '').localeCompare(a.start_date || ''));
+
+  const SECTIONS = [
+    ['ongoing', 'Ongoing'], ['upcoming', 'Upcoming'], ['done', 'Past'],
+  ];
+  list.innerHTML = SECTIONS.filter(([k]) => groups[k].length).map(([k, label]) => {
+    const collapsed = collapsedSections.has(k);
+    return `<div class="trip-section" data-section="${k}">
+      <button type="button" class="section-head${collapsed ? ' collapsed' : ''}">
+        <span>${label} <span class="sh-count">${groups[k].length}</span></span>
+        <span class="sh-caret">${collapsed ? '▸' : '▾'}</span>
+      </button>
+      <div class="section-body"${collapsed ? ' style="display:none"' : ''}>
+        ${groups[k].map(cardHTML).join('')}
+      </div>
+    </div>`;
+  }).join('') || '<p class="empty-note">No trips yet.</p>';
+
   list.querySelectorAll('.trip-card').forEach(c =>
     c.addEventListener('click', () => openTrip(c.dataset.trip)));
+  list.querySelectorAll('.section-head').forEach(h => h.addEventListener('click', () => {
+    const sec = h.closest('.trip-section').dataset.section;
+    const body = h.nextElementSibling;
+    const nowCollapsed = !h.classList.contains('collapsed');
+    h.classList.toggle('collapsed', nowCollapsed);
+    body.style.display = nowCollapsed ? 'none' : '';
+    h.querySelector('.sh-caret').textContent = nowCollapsed ? '▸' : '▾';
+    if (nowCollapsed) collapsedSections.add(sec); else collapsedSections.delete(sec);
+    try { localStorage.setItem('ts_collapsed', JSON.stringify([...collapsedSections])); } catch {}
+  }));
 }
 
 // ---------- trip detail ----------
@@ -920,7 +976,15 @@ function currencyPicker(current, handlerName, extraArg) {
 async function refreshTotals() {
   const base = currentTrip?.base_currency || 'EUR';
   $('trip-total').innerHTML = `<div class="total-bar"><span class="tb-label">Trip total</span><div class="tb-value">…</div></div>`;
-  const c = await convertAndSum(currentStays, currentTransport, base);
+  let c;
+  try {
+    c = await convertAndSum(currentStays, currentTransport, base);
+  } catch (err) {
+    // last-ditch: plain sums so the bars always render
+    const raw = (rows) => rows.reduce((a, r) => a + (Number(r.amount_base ?? r.price) || 0), 0);
+    c = { staysTotal: raw(currentStays), transportTotal: raw(currentTransport),
+          total: raw(currentStays) + raw(currentTransport) };
+  }
 
   $('transport-total').innerHTML = `<div class="total-bar">
     <span class="tb-label">Total transport</span>
