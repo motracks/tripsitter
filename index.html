@@ -166,6 +166,52 @@
 
   .hidden { display: none !important; }
   @keyframes fadeUp { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+
+  /* BUTTONS */
+  .btn { font-family: 'Syne', sans-serif; font-weight: 600; font-size: 12px; border-radius: var(--r);
+    padding: 9px 14px; cursor: pointer; border: 0.5px solid var(--border2); background: var(--surface2); color: var(--text); }
+  .btn-green { background: var(--green); color: #0d0f0e; border-color: var(--green); }
+  .btn-ghost { background: none; color: var(--muted); }
+  .btn-danger { background: var(--red-dim); color: var(--red); border-color: rgba(255,95,87,0.25); }
+  .btn-sm { font-size: 10px; padding: 4px 9px; font-family: 'DM Mono', monospace; font-weight: 400; }
+  .add-row { display: flex; justify-content: flex-end; margin-bottom: 10px; }
+
+  .card-actions { display: flex; gap: 6px; justify-content: flex-end; margin-top: 12px; padding-top: 12px; border-top: 0.5px solid var(--border); }
+
+  /* MODAL */
+  #modal { position: fixed; inset: 0; background: rgba(0,0,0,0.6); display: flex; align-items: flex-start;
+    justify-content: center; padding: 6vh 1rem 2rem; overflow-y: auto; z-index: 50; }
+  .modal-box { background: var(--surface); border: 0.5px solid var(--border2); border-radius: 14px;
+    width: 100%; max-width: 440px; padding: 20px; animation: fadeUp 0.2s ease both; }
+  .modal-box h2 { font-size: 18px; font-weight: 700; margin-bottom: 4px; }
+  .modal-box .mb-sub { font-size: 11px; font-family: 'DM Mono', monospace; color: var(--muted); margin-bottom: 16px; }
+  .field { display: flex; flex-direction: column; gap: 4px; margin-bottom: 12px; }
+  .field label { font-size: 10px; font-family: 'DM Mono', monospace; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; }
+  .field input, .field select, .field textarea {
+    background: var(--surface2); border: 0.5px solid var(--border2); border-radius: 8px; padding: 9px 11px;
+    color: var(--text); font-family: 'DM Mono', monospace; font-size: 12px; width: 100%;
+  }
+  .field textarea { min-height: 60px; resize: vertical; }
+  .field input:focus, .field select:focus, .field textarea:focus { outline: none; border-color: var(--green); }
+  .field-2 { display: flex; gap: 10px; }
+  .field-2 > .field { flex: 1; }
+  .modal-actions { display: flex; gap: 8px; justify-content: space-between; margin-top: 8px; }
+  .modal-actions .right { display: flex; gap: 8px; }
+  .modal-msg { font-size: 11px; font-family: 'DM Mono', monospace; min-height: 14px; margin-top: 8px; color: var(--red); }
+
+  /* ATTACHMENT */
+  .attach-box { border: 0.5px dashed var(--border2); border-radius: 8px; padding: 12px; text-align: center;
+    font-family: 'DM Mono', monospace; font-size: 11px; color: var(--muted); cursor: pointer; }
+  .attach-box:hover { border-color: var(--green); color: var(--text); }
+  .attach-preview img { max-width: 100%; border-radius: 8px; margin-top: 8px; background: #fff; padding: 4px; }
+  .attach-thumb { max-width: 140px; border-radius: 8px; background: #fff; padding: 4px; margin-top: 4px; }
+  .parse-note { font-size: 10px; color: var(--amber); font-family: 'DM Mono', monospace; margin-top: 6px; }
+
+  /* LAYOVER */
+  .layover-connector { display: flex; align-items: center; gap: 10px; margin: -2px 0 8px 52px; animation: fadeUp 0.3s ease both; }
+  .layover-line { flex: 1; height: 1px; background: var(--border2); }
+  .layover-pill { font-size: 10px; font-family: 'DM Mono', monospace; color: var(--amber); background: var(--amber-dim);
+    border: 0.5px solid rgba(245,197,66,0.2); padding: 3px 9px; border-radius: 99px; white-space: nowrap; letter-spacing: 0.04em; }
 </style>
 </head>
 <body>
@@ -195,7 +241,7 @@
     </div>
   </header>
   <div style="padding:0 1.25rem">
-    <p class="section-label">All trips</p>
+    <div class="add-row"><button class="btn btn-green btn-sm" id="new-trip-btn">+ New trip</button></div>
     <div class="card-grid" id="trips-list"></div>
   </div>
 </div>
@@ -228,28 +274,38 @@
   </div>
 
   <div class="panel active" id="panel-trip">
+    <div class="add-row">
+      <button class="btn btn-ghost btn-sm" id="edit-trip-btn">edit trip</button>
+      <button class="btn btn-green btn-sm" id="add-transport-btn">+ transport</button>
+      <button class="btn btn-green btn-sm" id="add-stay-btn">+ stay</button>
+    </div>
     <p class="section-label">Full timeline</p>
     <div class="timeline" id="timeline"><div class="tl-line"></div></div>
     <div id="trip-total"></div>
   </div>
 
   <div class="panel" id="panel-stays">
+    <div class="add-row"><button class="btn btn-green btn-sm" id="add-stay-btn-2">+ stay</button></div>
     <p class="section-label">Accommodations</p>
     <div class="card-grid" id="stays-list"></div>
     <div id="stays-total"></div>
   </div>
 
   <div class="panel" id="panel-transport">
+    <div class="add-row"><button class="btn btn-green btn-sm" id="add-transport-btn-2">+ transport</button></div>
     <p class="section-label">Flights &amp; ground</p>
     <div class="card-grid" id="transport-list"></div>
     <div id="transport-total"></div>
   </div>
 
   <div class="panel" id="panel-visa">
+    <div class="add-row"><button class="btn btn-green btn-sm" id="add-doc-btn">+ document</button></div>
     <p class="section-label">Travel authorizations</p>
     <div class="card-grid" id="visa-list"></div>
   </div>
 </div>
+
+<div id="modal" class="hidden"></div>
 
 <script type="module">
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
@@ -492,7 +548,7 @@ function guessCurrency(destination) {
   return 'EUR';
 }
 
-let currentTrip = null, currentStays = [], currentTransport = [];
+let currentTrip = null, currentStays = [], currentTransport = [], currentDocs = [];
 
 async function openTrip(tripId) {
   show('detail');
@@ -516,6 +572,7 @@ async function openTrip(tripId) {
   currentTrip = trip;
   currentStays = stays || [];
   currentTransport = transport || [];
+  currentDocs = docs || [];
 
   $('detail-name').textContent = trip?.name || 'Trip';
   $('detail-sub').textContent = trip
@@ -528,6 +585,26 @@ async function openTrip(tripId) {
   renderTransport(currentTransport);
   renderVisa(docs || [], trip);
   refreshTotals();
+}
+
+// Attachment: a placeholder row that hydrateAttachments() fills with a
+// signed-URL <img> after render (signing is async).
+function attachmentRow(path) {
+  if (!path) return '';
+  return `<div class="detail-row" style="flex-direction:column;align-items:stretch">
+    <span class="detail-label">Attachment</span>
+    <span class="detail-value" style="text-align:left"><span class="attach-slot" data-path="${esc(path)}">loading…</span></span>
+  </div>`;
+}
+async function hydrateAttachments(container) {
+  const slots = container.querySelectorAll('.attach-slot[data-path]');
+  for (const slot of slots) {
+    const path = slot.dataset.path;
+    const { data } = await sb.storage.from('tickets').createSignedUrl(path, 3600);
+    slot.outerHTML = data?.signedUrl
+      ? `<img class="attach-thumb" src="${data.signedUrl}" alt="attachment">`
+      : 'image unavailable';
+  }
 }
 
 // Currency-sign picker: a <select> styled as a pill. `onchange` name is a
@@ -611,8 +688,31 @@ function renderTimeline(stays, transport) {
   tl.innerHTML = '<div class="tl-line"></div>';
   if (!items.length) { tl.innerHTML += '<p class="empty-note">Nothing scheduled.</p>'; return; }
 
+  const gapLabel = (ms) => {
+    const h = Math.floor(ms / 3600000), m = Math.round((ms % 3600000) / 60000);
+    return h > 0 ? `${h}h ${m}m` : `${m}m`;
+  };
+
   items.forEach((item, idx) => {
     const delay = (0.05 + idx * 0.03).toFixed(2);
+
+    // Layover connector: previous item is transport, this is transport, and
+    // the two legs are within 24h of each other.
+    const prev = items[idx - 1];
+    if (item.kind === 'transport' && prev?.kind === 'transport') {
+      const prevEnd = new Date(prev.data.arrival || prev.data.departure);
+      const thisStart = new Date(item.data.departure);
+      const gap = thisStart - prevEnd;
+      if (gap >= 0 && gap < 86400000) {
+        tl.insertAdjacentHTML('beforeend', `
+          <div class="layover-connector">
+            <div class="layover-line"></div>
+            <div class="layover-pill">${gapLabel(gap)} until ${esc((item.data.type || 'next').toLowerCase())}</div>
+            <div class="layover-line"></div>
+          </div>`);
+      }
+    }
+
     if (item.kind === 'transport') {
       const t = item.data;
       const type = (t.type || '').toLowerCase();
@@ -622,6 +722,7 @@ function renderTimeline(stays, transport) {
         t.arrival && `<div class="detail-row"><span class="detail-label">Arrives</span><span class="detail-value">${esc(fmtDT(t.arrival))}</span></div>`,
         t.price != null && `<div class="detail-row"><span class="detail-label">Price</span><span class="detail-value">${Number(t.price) === 0 ? 'free' : fmtMoney(t.price, t.currency)}</span></div>`,
         t.notes && `<div class="detail-row"><span class="detail-label">Notes</span><span class="detail-value">${esc(t.notes)}</span></div>`,
+        attachmentRow(t.attachment_path),
       ].filter(Boolean).join('');
       tl.insertAdjacentHTML('beforeend', `
         <div class="tl-item" style="animation-delay:${delay}s">
@@ -633,7 +734,9 @@ function renderTimeline(stays, transport) {
             </div>
             <div class="tl-title">${esc(t.origin || '')} → ${esc(t.destination || '')}</div>
             <div class="tl-sub">${esc(t.carrier || '')}</div>
-            <div class="tl-details">${rows || '<div class="detail-row"><span class="detail-label">No extra detail</span><span class="detail-value"></span></div>'}</div>
+            <div class="tl-details">${rows || '<div class="detail-row"><span class="detail-label">No extra detail</span><span class="detail-value"></span></div>'}
+              <div class="card-actions"><button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();transportForm(currentTransport.find(x=>x.id==='${t.id}'))">edit</button></div>
+            </div>
           </div>
         </div>`);
     } else {
@@ -645,6 +748,7 @@ function renderTimeline(stays, transport) {
         s.pets && `<div class="detail-row"><span class="detail-label">Pets</span><span class="detail-value">${esc(s.pets)}</span></div>`,
         s.price != null && `<div class="detail-row"><span class="detail-label">Price</span><span class="detail-value">${Number(s.price) === 0 ? 'unpaid' : fmtMoney(s.price, s.currency)}</span></div>`,
         s.notes && `<div class="detail-row"><span class="detail-label">Notes</span><span class="detail-value">${esc(s.notes)}</span></div>`,
+        attachmentRow(s.attachment_path),
       ].filter(Boolean).join('');
       tl.insertAdjacentHTML('beforeend', `
         <div class="tl-item" style="animation-delay:${delay}s">
@@ -656,11 +760,14 @@ function renderTimeline(stays, transport) {
             </div>
             <div class="tl-title">${esc(s.city || '')}</div>
             <div class="tl-sub">${n != null ? n + ' night' + (n === 1 ? '' : 's') : ''}${s.host_name ? ' · ' + esc(s.host_name) : ''}</div>
-            <div class="tl-details">${rows || '<div class="detail-row"><span class="detail-label">No extra detail</span><span class="detail-value"></span></div>'}</div>
+            <div class="tl-details">${rows || '<div class="detail-row"><span class="detail-label">No extra detail</span><span class="detail-value"></span></div>'}
+              <div class="card-actions"><button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();stayForm(currentStays.find(x=>x.id==='${s.id}'))">edit</button></div>
+            </div>
           </div>
         </div>`);
     }
   });
+  hydrateAttachments(tl);
 }
 
 function renderStays(stays) {
@@ -675,15 +782,19 @@ function renderStays(stays) {
       s.pets && `<div class="detail-row"><span class="detail-label">Pets</span><span class="detail-value">${esc(s.pets)}</span></div>`,
       s.price != null && `<div class="detail-row"><span class="detail-label">Price</span><span class="detail-value" style="display:flex;align-items:center;gap:8px">${Number(s.price) === 0 ? 'unpaid' : money(Number(s.price))} ${currencyPicker(s.currency || 'EUR', 'setStayCurrency', s.id)}</span></div>`,
       s.notes && `<div class="detail-row"><span class="detail-label">Notes</span><span class="detail-value">${esc(s.notes)}</span></div>`,
+      attachmentRow(s.attachment_path),
     ].filter(Boolean).join('');
     return `<div class="info-card" onclick="toggleCard(this)">
       <div class="ic-header">
         <div><div class="ic-city">${esc(s.city || '')}</div><div class="ic-dates">${esc(fmtDate(s.start_date))} – ${esc(fmtDate(s.end_date))}${n != null ? ' · ' + n + ' night' + (n === 1 ? '' : 's') : ''}</div></div>
         <span class="ic-tag">${esc(s.type || 'stay')}</span>
       </div>
-      <div class="ic-details">${rows}</div>
+      <div class="ic-details">${rows}
+        <div class="card-actions"><button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();stayForm(currentStays.find(x=>x.id==='${s.id}'))">edit</button></div>
+      </div>
     </div>`;
   }).join('');
+  hydrateAttachments($('stays-list'));
 }
 
 function renderTransport(transport) {
@@ -698,15 +809,19 @@ function renderTransport(transport) {
       t.arrival && `<div class="detail-row"><span class="detail-label">Arrives</span><span class="detail-value">${esc(fmtDT(t.arrival))}</span></div>`,
       t.price != null && `<div class="detail-row"><span class="detail-label">Price</span><span class="detail-value" style="display:flex;align-items:center;gap:8px">${Number(t.price) === 0 ? 'free' : money(Number(t.price))} ${currencyPicker(t.currency || 'EUR', 'setTransportCurrency', t.id)}</span></div>`,
       t.notes && `<div class="detail-row"><span class="detail-label">Notes</span><span class="detail-value">${esc(t.notes)}</span></div>`,
+      attachmentRow(t.attachment_path),
     ].filter(Boolean).join('');
     return `<div class="info-card" onclick="toggleCard(this)">
       <div class="ic-header">
         <div><div class="ic-city">${esc(t.origin || '')} → ${esc(t.destination || '')}</div><div class="ic-dates">${esc(fmtDT(t.departure))}${t.carrier ? ' · ' + esc(t.carrier) : ''}</div></div>
         <span class="ic-tag">${icon((t.type || '').toLowerCase())}</span>
       </div>
-      <div class="ic-details">${rows}</div>
+      <div class="ic-details">${rows}
+        <div class="card-actions"><button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();transportForm(currentTransport.find(x=>x.id==='${t.id}'))">edit</button></div>
+      </div>
     </div>`;
   }).join('');
+  hydrateAttachments($('transport-list'));
 }
 
 function renderVisa(docs, trip) {
@@ -720,18 +835,330 @@ function renderVisa(docs, trip) {
       d.reference_number && `<div class="detail-row"><span class="detail-label">Reference</span><span class="detail-value" style="display:flex;align-items:center;gap:6px;font-family:'DM Mono',monospace">${esc(d.reference_number)} <button class="copy-btn" onclick="event.stopPropagation();copyText('${esc(d.reference_number)}',this)">copy</button></span></div>`,
       d.doc_type === 'ESTA' && days != null && `<div class="detail-row"><span class="detail-label">This trip</span><span class="detail-value">${days} days used</span></div>`,
       d.notes && `<div class="detail-row"><span class="detail-label">Notes</span><span class="detail-value">${esc(d.notes)}</span></div>`,
+      attachmentRow(d.attachment_path),
     ].filter(Boolean).join('');
     return `<div class="info-card" onclick="toggleCard(this)">
       <div class="ic-header">
         <div><div class="ic-city">${esc(d.doc_type || 'Document')}</div><div class="ic-dates">${esc(d.country || '')}</div></div>
         <span class="ic-tag">${esc(d.status || '')}</span>
       </div>
-      <div class="ic-details">${rows}</div>
+      <div class="ic-details">${rows}
+        <div class="card-actions"><button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();docForm(currentDocs.find(x=>x.id==='${d.id}'))">edit</button></div>
+      </div>
     </div>`;
   }).join('');
+  hydrateAttachments($('visa-list'));
 }
 
+// ---------- CRUD: modal form engine ----------
+// A field spec: { key, label, type, options?, required?, half? }
+// types: text | number | date | datetime | textarea | select | currency
+function fieldHTML(f, val) {
+  const v = val == null ? '' : val;
+  if (f.type === 'textarea')
+    return `<div class="field"><label>${esc(f.label)}</label><textarea data-key="${f.key}">${esc(v)}</textarea></div>`;
+  if (f.type === 'select' || f.type === 'currency') {
+    const opts = (f.type === 'currency' ? CURRENCIES : f.options)
+      .map(o => `<option value="${esc(o)}"${String(o) === String(v) ? ' selected' : ''}>${esc(o)}</option>`).join('');
+    return `<div class="field"><label>${esc(f.label)}</label><select data-key="${f.key}">${f.required ? '' : '<option value="">—</option>'}${opts}</select></div>`;
+  }
+  const inputType = f.type === 'datetime' ? 'datetime-local' : (f.type === 'date' ? 'date' : (f.type === 'number' ? 'number' : 'text'));
+  let iv = v;
+  if (f.type === 'datetime' && v) iv = new Date(v).toISOString().slice(0, 16);
+  if (f.type === 'date' && v) iv = String(v).slice(0, 10);
+  return `<div class="field"><label>${esc(f.label)}</label><input type="${inputType}"${f.type === 'number' ? ' step="0.01"' : ''} data-key="${f.key}" value="${esc(iv)}"></div>`;
+}
+
+let modalOnClose = null;
+function closeModal() { $('modal').classList.add('hidden'); $('modal').innerHTML = ''; if (modalOnClose) { const f = modalOnClose; modalOnClose = null; f(); } }
+window.closeModal = closeModal;
+
+// opts: { title, subtitle, fields, values, onSave(data), onDelete?, attach? {tripId,rowId} }
+function openForm(opts) {
+  const { title, subtitle, fields, values = {}, onSave, onDelete, attach } = opts;
+  const grouped = [];
+  for (let i = 0; i < fields.length; i++) {
+    if (fields[i].half && fields[i + 1]?.half) { grouped.push([fields[i], fields[i + 1]]); i++; }
+    else grouped.push([fields[i]]);
+  }
+  const body = grouped.map(g =>
+    g.length === 2
+      ? `<div class="field-2">${fieldHTML(g[0], values[g[0].key])}${fieldHTML(g[1], values[g[1].key])}</div>`
+      : fieldHTML(g[0], values[g[0].key])
+  ).join('');
+
+  const attachBlock = attach ? `
+    <div class="field">
+      <label>Ticket / QR / document image</label>
+      <div class="attach-box" id="attach-trigger">${values.attachment_path ? 'replace image' : 'upload an image — fields auto-fill from it'}</div>
+      <input type="file" id="attach-input" accept="image/*" class="hidden">
+      <div class="attach-preview" id="attach-preview"></div>
+      <label style="flex-direction:row;gap:6px;align-items:center;margin-top:6px;text-transform:none">
+        <input type="checkbox" id="attach-keep" style="width:auto" ${attach.defaultKeep ? 'checked' : ''}> keep the image after parsing
+      </label>
+      <div class="parse-note hidden" id="attach-parsenote"></div>
+    </div>` : '';
+
+  $('modal').innerHTML = `
+    <div class="modal-box">
+      <h2>${esc(title)}</h2>
+      ${subtitle ? `<div class="mb-sub">${esc(subtitle)}</div>` : ''}
+      <form id="modal-form">
+        ${attachBlock}
+        ${body}
+        <div class="modal-msg" id="modal-msg"></div>
+        <div class="modal-actions">
+          ${onDelete ? '<button type="button" class="btn btn-danger btn-sm" id="modal-delete">delete</button>' : '<span></span>'}
+          <div class="right">
+            <button type="button" class="btn btn-ghost btn-sm" onclick="closeModal()">cancel</button>
+            <button type="submit" class="btn btn-green btn-sm" id="modal-save">save</button>
+          </div>
+        </div>
+      </form>
+    </div>`;
+  $('modal').classList.remove('hidden');
+  $('modal').onclick = (e) => { if (e.target === $('modal')) closeModal(); };
+
+  const readForm = () => {
+    const data = {};
+    $('modal').querySelectorAll('[data-key]').forEach(el => {
+      let v = el.type === 'checkbox' ? el.checked : el.value;
+      if (v === '') v = null;
+      if (el.tagName === 'INPUT' && el.type === 'number' && v != null) v = Number(v);
+      if (el.tagName === 'INPUT' && el.type === 'datetime-local' && v) v = new Date(v).toISOString();
+      data[el.dataset.key] = v;
+    });
+    return data;
+  };
+
+  let pendingFile = null;
+  if (attach) {
+    $('attach-trigger').onclick = () => $('attach-input').click();
+    $('attach-input').onchange = async () => {
+      const file = $('attach-input').files[0];
+      if (!file) return;
+      pendingFile = file;
+      $('attach-preview').innerHTML = `<img src="${URL.createObjectURL(file)}">`;
+      $('attach-parsenote').classList.remove('hidden');
+      $('attach-parsenote').textContent = 'reading image…';
+      try {
+        const parsed = await parseTicket(file, attach.kind);
+        if (parsed && Object.keys(parsed).length) {
+          for (const [k, val] of Object.entries(parsed)) {
+            const el = $('modal').querySelector(`[data-key="${k}"]`);
+            if (el && val != null && val !== '') {
+              if (el.type === 'datetime-local') el.value = new Date(val).toISOString().slice(0, 16);
+              else if (el.type === 'date') el.value = String(val).slice(0, 10);
+              else el.value = val;
+            }
+          }
+          $('attach-parsenote').textContent = 'fields filled from image — check them before saving';
+        } else {
+          $('attach-parsenote').textContent = 'could not read fields — enter them manually';
+        }
+      } catch (err) {
+        $('attach-parsenote').textContent = 'parsing unavailable — enter fields manually';
+      }
+    };
+  }
+
+  $('modal-form').onsubmit = async (e) => {
+    e.preventDefault();
+    $('modal-save').disabled = true;
+    $('modal-msg').textContent = '';
+    try {
+      const data = readForm();
+      const keepImage = attach ? $('attach-keep')?.checked : false;
+      const saved = await onSave(data);
+      if (attach && pendingFile && keepImage) {
+        const rowId = saved?.id || attach.rowId;
+        let folder = attach.folder;
+        if (attach.userFolder) {
+          const { data: { user } } = await sb.auth.getUser();
+          folder = `user/${user.id}`;
+        }
+        const path = `${folder}/${rowId}/${Date.now()}_${pendingFile.name.replace(/[^\w.-]/g, '_')}`;
+        const up = await sb.storage.from('tickets').upload(path, pendingFile, { upsert: true });
+        if (!up.error) await sb.from(attach.table).update({ attachment_path: path }).eq('id', rowId);
+      } else if (attach && pendingFile && !keepImage && attach.rowId && values.attachment_path) {
+        // user unchecked keep on an existing image → remove it
+        await sb.storage.from('tickets').remove([values.attachment_path]);
+        await sb.from(attach.table).update({ attachment_path: null }).eq('id', attach.rowId);
+      }
+      closeModal();
+      if (opts.after) await opts.after();
+    } catch (err) {
+      $('modal-msg').textContent = err.message || String(err);
+      $('modal-save').disabled = false;
+    }
+  };
+
+  if (onDelete) $('modal-delete').onclick = async () => {
+    if (!confirm('Delete this permanently?')) return;
+    $('modal-delete').disabled = true;
+    try { await onDelete(); closeModal(); if (opts.after) await opts.after(); }
+    catch (err) { $('modal-msg').textContent = err.message || String(err); $('modal-delete').disabled = false; }
+  };
+}
+
+// Send an image to the parse endpoint. kind = 'transport' | 'stay' | 'doc'.
+async function parseTicket(file, kind) {
+  const b64 = await new Promise((res, rej) => {
+    const r = new FileReader();
+    r.onload = () => res(String(r.result).split(',')[1]);
+    r.onerror = rej;
+    r.readAsDataURL(file);
+  });
+  const res = await fetch('/api/parse-ticket', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ image: b64, mime: file.type, kind }),
+  });
+  if (!res.ok) throw new Error('parse failed');
+  return await res.json();
+}
+
+// ---------- CRUD: entity field specs + handlers ----------
+const TRIP_FIELDS = [
+  { key: 'name', label: 'Trip name', type: 'text', required: true },
+  { key: 'destination', label: 'Destination', type: 'text' },
+  { key: 'start_date', label: 'Start', type: 'date', half: true },
+  { key: 'end_date', label: 'End', type: 'date', half: true },
+  { key: 'base_currency', label: 'Base currency', type: 'currency' },
+];
+const STAY_FIELDS = [
+  { key: 'type', label: 'Type', type: 'select', options: ['THS', 'hostel', 'hotel', 'airbnb', 'friend', 'other'] },
+  { key: 'city', label: 'City', type: 'text' },
+  { key: 'start_date', label: 'Check-in', type: 'date', half: true },
+  { key: 'end_date', label: 'Check-out', type: 'date', half: true },
+  { key: 'host_name', label: 'Host', type: 'text' },
+  { key: 'address', label: 'Address', type: 'text' },
+  { key: 'pets', label: 'Pets', type: 'text' },
+  { key: 'price', label: 'Price', type: 'number', half: true },
+  { key: 'currency', label: 'Currency', type: 'currency', half: true },
+  { key: 'notes', label: 'Notes', type: 'textarea' },
+];
+const TRANSPORT_FIELDS = [
+  { key: 'type', label: 'Type', type: 'select', options: ['flight', 'bus', 'train', 'ferry', 'car', 'other'] },
+  { key: 'origin', label: 'From', type: 'text', half: true },
+  { key: 'destination', label: 'To', type: 'text', half: true },
+  { key: 'departure', label: 'Departs', type: 'datetime', half: true },
+  { key: 'arrival', label: 'Arrives', type: 'datetime', half: true },
+  { key: 'carrier', label: 'Carrier', type: 'text' },
+  { key: 'booking_code', label: 'Booking code', type: 'text' },
+  { key: 'price', label: 'Price', type: 'number', half: true },
+  { key: 'currency', label: 'Currency', type: 'currency', half: true },
+  { key: 'notes', label: 'Notes', type: 'textarea' },
+];
+const DOC_FIELDS = [
+  { key: 'doc_type', label: 'Type', type: 'select', options: ['ESTA', 'Visa', 'Global Entry', 'Passport', 'Vaccination', 'Insurance', 'other'] },
+  { key: 'country', label: 'Country', type: 'text' },
+  { key: 'status', label: 'Status', type: 'text' },
+  { key: 'expires_on', label: 'Expires', type: 'date' },
+  { key: 'reference_number', label: 'Reference number', type: 'text' },
+  { key: 'notes', label: 'Notes', type: 'textarea' },
+];
+
+function newTrip() {
+  openForm({
+    title: 'New trip', fields: TRIP_FIELDS, values: { base_currency: 'EUR' },
+    onSave: async (d) => {
+      const { data: { user } } = await sb.auth.getUser();
+      if (!d.base_currency) d.base_currency = guessCurrency(d.destination);
+      const { data, error } = await sb.from('trips').insert({ ...d, user_id: user.id }).select().single();
+      if (error) throw error; return data;
+    },
+    after: routeToOverview,
+  });
+}
+function editTrip() {
+  openForm({
+    title: 'Edit trip', fields: TRIP_FIELDS, values: currentTrip,
+    onSave: async (d) => {
+      const { error } = await sb.from('trips').update(d).eq('id', currentTrip.id);
+      if (error) throw error;
+    },
+    onDelete: async () => {
+      // wipe storage objects for this trip, then the row (cascade handles children)
+      const paths = [...currentStays, ...currentTransport].map(r => r.attachment_path).filter(Boolean);
+      if (paths.length) await sb.storage.from('tickets').remove(paths);
+      const { error } = await sb.from('trips').delete().eq('id', currentTrip.id);
+      if (error) throw error;
+    },
+    after: async () => { if (currentTrip && !await tripStillExists()) routeToOverview(); else openTrip(currentTrip.id); },
+  });
+}
+async function tripStillExists() {
+  const { data } = await sb.from('trips').select('id').eq('id', currentTrip.id).maybeSingle();
+  return !!data;
+}
+
+function stayForm(row) {
+  const editing = !!row;
+  openForm({
+    title: editing ? 'Edit stay' : 'Add stay', fields: STAY_FIELDS,
+    values: row || { type: 'THS', currency: currentTrip?.base_currency || 'EUR' },
+    attach: { table: 'stays', folder: currentTrip.id, rowId: row?.id, kind: 'stay', defaultKeep: false },
+    onSave: async (d) => {
+      if (editing) { const { error } = await sb.from('stays').update(d).eq('id', row.id); if (error) throw error; return row; }
+      const { data, error } = await sb.from('stays').insert({ ...d, trip_id: currentTrip.id }).select().single();
+      if (error) throw error; return data;
+    },
+    onDelete: editing ? async () => {
+      if (row.attachment_path) await sb.storage.from('tickets').remove([row.attachment_path]);
+      const { error } = await sb.from('stays').delete().eq('id', row.id); if (error) throw error;
+    } : null,
+    after: () => openTrip(currentTrip.id),
+  });
+}
+function transportForm(row) {
+  const editing = !!row;
+  openForm({
+    title: editing ? 'Edit transport' : 'Add transport', fields: TRANSPORT_FIELDS,
+    values: row || { type: 'flight', currency: currentTrip?.base_currency || 'EUR' },
+    attach: { table: 'transport', folder: currentTrip.id, rowId: row?.id, kind: 'transport', defaultKeep: true },
+    onSave: async (d) => {
+      if (editing) { const { error } = await sb.from('transport').update(d).eq('id', row.id); if (error) throw error; return row; }
+      const { data, error } = await sb.from('transport').insert({ ...d, trip_id: currentTrip.id }).select().single();
+      if (error) throw error; return data;
+    },
+    onDelete: editing ? async () => {
+      if (row.attachment_path) await sb.storage.from('tickets').remove([row.attachment_path]);
+      const { error } = await sb.from('transport').delete().eq('id', row.id); if (error) throw error;
+    } : null,
+    after: () => openTrip(currentTrip.id),
+  });
+}
+function docForm(row) {
+  const editing = !!row;
+  openForm({
+    title: editing ? 'Edit document' : 'Add document', fields: DOC_FIELDS,
+    values: row || {},
+    attach: { table: 'travel_docs', folder: 'user', rowId: row?.id, kind: 'doc', defaultKeep: false, userFolder: true },
+    onSave: async (d) => {
+      const { data: { user } } = await sb.auth.getUser();
+      if (editing) { const { error } = await sb.from('travel_docs').update(d).eq('id', row.id); if (error) throw error; return row; }
+      const { data, error } = await sb.from('travel_docs').insert({ ...d, user_id: user.id }).select().single();
+      if (error) throw error; return data;
+    },
+    onDelete: editing ? async () => {
+      if (row.attachment_path) await sb.storage.from('tickets').remove([row.attachment_path]);
+      const { error } = await sb.from('travel_docs').delete().eq('id', row.id); if (error) throw error;
+    } : null,
+    after: () => openTrip(currentTrip.id),
+  });
+}
+window.stayForm = stayForm; window.transportForm = transportForm; window.docForm = docForm;
+
 // ---------- boot ----------
+$('new-trip-btn').addEventListener('click', newTrip);
+$('edit-trip-btn').addEventListener('click', editTrip);
+$('add-stay-btn').addEventListener('click', () => stayForm());
+$('add-stay-btn-2').addEventListener('click', () => stayForm());
+$('add-transport-btn').addEventListener('click', () => transportForm());
+$('add-transport-btn-2').addEventListener('click', () => transportForm());
+$('add-doc-btn').addEventListener('click', () => docForm());
+
 (async () => {
   const { data: { session } } = await sb.auth.getSession();
   if (session) routeToOverview();
