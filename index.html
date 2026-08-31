@@ -137,15 +137,18 @@
   .tc-name { font-size: 18px; font-weight: 700; letter-spacing: -0.01em; }
   .tc-dest { font-size: 12px; font-family: 'DM Mono', monospace; color: var(--muted); margin-top: 3px; }
   .tc-dates { font-size: 11px; font-family: 'DM Mono', monospace; color: var(--faint); margin-top: 8px; }
+  .tc-total { font-size: 11px; font-family: 'DM Mono', monospace; color: var(--green); margin-top: 6px; letter-spacing: 0.04em; }
   .status-pill { font-size: 10px; font-family: 'DM Mono', monospace; padding: 3px 9px; border-radius: 99px; text-transform: uppercase; letter-spacing: 0.06em; flex-shrink: 0; }
   .status-upcoming { background: var(--blue-dim); color: var(--blue); }
   .status-ongoing { background: var(--green-dim); color: var(--green); }
   .status-done { background: var(--faint); color: var(--muted); }
 
-  .total-bar { background: var(--surface); border: 0.5px solid var(--border); border-radius: var(--r); padding: 14px 16px; display: flex; justify-content: space-between; align-items: center; margin-top: 10px; }
+  .total-bar { background: var(--surface); border: 0.5px solid var(--border); border-radius: var(--r); padding: 14px 16px; display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; margin-top: 10px; }
   .total-bar .tb-label { font-size: 11px; font-family: 'DM Mono', monospace; color: var(--muted); text-transform: uppercase; letter-spacing: 0.08em; }
   .total-bar .tb-value { font-size: 14px; font-weight: 700; color: var(--green); text-align: right; }
-  .total-bar .tb-sub { font-size: 10px; color: var(--muted); font-family: 'DM Mono', monospace; margin-top: 2px; }
+  .total-bar.total-expand { cursor: pointer; transition: border-color 0.15s; }
+  .total-bar.total-expand:hover { border-color: var(--border2); }
+  .tb-breakdown { width: 100%; margin-top: 12px; padding-top: 12px; border-top: 0.5px solid var(--border); }
 
   .section-label { font-size: 10px; font-family: 'DM Mono', monospace; color: var(--faint); text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 10px; margin-top: 0.5rem; }
   .empty-note { font-size: 12px; font-family: 'DM Mono', monospace; color: var(--faint); text-align: center; padding: 2rem 0; }
@@ -288,15 +291,14 @@ function tripStatus(trip) {
   if (end && today > end) return 'done';
   return 'ongoing';
 }
-// Sum a numeric column, ignoring null/NaN/0. Returns { total, count } where
-// count is how many rows carried a real (non-zero) value.
+// Plain sum of a numeric column; null/blank/NaN count as 0.
 function sumMoney(rows, key) {
-  let total = 0, count = 0;
+  let total = 0;
   for (const r of rows) {
     const v = Number(r[key]);
-    if (r[key] != null && !Number.isNaN(v) && v !== 0) { total += v; count++; }
+    if (r[key] != null && !Number.isNaN(v)) total += v;
   }
-  return { total, count };
+  return total;
 }
 const money = (n) => n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 window.copyText = function (text, btn) {
@@ -352,13 +354,22 @@ async function routeToOverview() {
   show('overview');
   const { data: { user } } = await sb.auth.getUser();
   $('overview-sub').textContent = user?.email || 'travel archive';
-  const { data: trips, error } = await sb
-    .from('trips')
-    .select('*')
-    .order('start_date', { ascending: false });
+  const [{ data: trips, error }, { data: allStays }, { data: allTransport }] = await Promise.all([
+    sb.from('trips').select('*').order('start_date', { ascending: false }),
+    sb.from('stays').select('trip_id, price'),
+    sb.from('transport').select('trip_id, price'),
+  ]);
   const list = $('trips-list');
   if (error) { list.innerHTML = `<p class="empty-note">${esc(error.message)}</p>`; return; }
   if (!trips.length) { list.innerHTML = `<p class="empty-note">No trips yet.</p>`; return; }
+
+  // Sum every charge per trip_id.
+  const chargesByTrip = {};
+  for (const r of [...(allStays || []), ...(allTransport || [])]) {
+    const v = Number(r.price);
+    chargesByTrip[r.trip_id] = (chargesByTrip[r.trip_id] || 0) + (r.price != null && !Number.isNaN(v) ? v : 0);
+  }
+
   list.innerHTML = trips.map(t => {
     const st = tripStatus(t);
     const dates = t.start_date
@@ -373,6 +384,7 @@ async function routeToOverview() {
         <span class="status-pill status-${esc(st)}">${esc(st)}</span>
       </div>
       <div class="tc-dates">${esc(dates)}</div>
+      <div class="tc-total">Total ${money(chargesByTrip[t.id] || 0)}</div>
     </div>`;
   }).join('');
   list.querySelectorAll('.trip-card').forEach(c =>
@@ -420,26 +432,38 @@ async function openTrip(tripId) {
   renderTotals(stays || [], transport || []);
 }
 
-// Money sums over the user-supplied `price` values on stays and transport.
-function totalBar(id, label, count, total, subExtra) {
-  const el = $(id);
-  if (!count) { el.innerHTML = ''; return; }
-  el.innerHTML = `<div class="total-bar">
+// Sum of every charge on a trip: stays + transport price columns.
+function tripCharges(stays, transport) {
+  const staysTotal = sumMoney(stays, 'price');
+  const transportTotal = sumMoney(transport, 'price');
+  return { staysTotal, transportTotal, total: staysTotal + transportTotal };
+}
+
+// A plain always-on total bar (Stays / Transport tabs).
+function totalBar(id, label, total) {
+  $(id).innerHTML = `<div class="total-bar">
     <span class="tb-label">${esc(label)}</span>
-    <div>
-      <div class="tb-value">${money(total)}</div>
-      <div class="tb-sub">${count} item${count === 1 ? '' : 's'} with a value${subExtra ? ' · ' + esc(subExtra) : ''}</div>
+    <div class="tb-value">${money(total)}</div>
+  </div>`;
+}
+
+// Trip tab: value only, breakdown revealed on click.
+function tripTotalBar(id, charges) {
+  $(id).innerHTML = `<div class="total-bar total-expand" onclick="toggleCard(this)">
+    <span class="tb-label">Trip total</span>
+    <div class="tb-value">${money(charges.total)}</div>
+    <div class="tb-breakdown ic-details">
+      <div class="detail-row"><span class="detail-label">Transport</span><span class="detail-value">${money(charges.transportTotal)}</span></div>
+      <div class="detail-row"><span class="detail-label">Stays</span><span class="detail-value">${money(charges.staysTotal)}</span></div>
     </div>
   </div>`;
 }
+
 function renderTotals(stays, transport) {
-  const tp = sumMoney(transport, 'price');
-  const st = sumMoney(stays, 'price');
-  totalBar('transport-total', 'Total transport', tp.count, tp.total);
-  totalBar('stays-total', 'Total stays', st.count, st.total);
-  const tripCount = tp.count + st.count;
-  totalBar('trip-total', 'Trip total', tripCount, tp.total + st.total,
-    tripCount ? `transport ${money(tp.total)} + stays ${money(st.total)}` : '');
+  const c = tripCharges(stays, transport);
+  totalBar('transport-total', 'Total transport', c.transportTotal);
+  totalBar('stays-total', 'Total stays', c.staysTotal);
+  tripTotalBar('trip-total', c);
 }
 
 function renderEsta(trip) {
