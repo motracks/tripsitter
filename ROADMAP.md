@@ -18,6 +18,16 @@ Ideas parked for later. Nothing here is committed to; it's a memory aid.
 - Ticket parsing (Gemini vision): multi-image, browser downscale, auto-fills fields
   incl. purpose; images discarded by default (kept for transport)
 - Attachments: multiple per row, thumbnail gallery, signed URLs
+- **Approved-visa override**: an approved Visa document (with its own allowed-stay
+  days, and an optional calendar-year cap like India's 180/yr) overrides the
+  static visa-free lookup on the entry tab, auto-filled from the scanned
+  document where stated
+- **Schengen 90/180 rule**: rolling 180-day window, summed across every trip
+  tagged with a Schengen-bloc country (not just the open one), shown on the
+  entry tab whenever a trip touches the bloc
+- **Passport expiry warning**: inline badge on a Passport document when it
+  expires within 6 months (or already has), since many countries require
+  onward validity beyond the travel dates
 
 ## Next up — the map / globe  ← IN PROGRESS
 
@@ -37,7 +47,9 @@ by SPEC-maps.md but kept for context.
 | **PWA / offline** | Installable, service worker caching the shell + last-loaded trip data, so it works on a plane. | Medium |
 | **Full-screen QR view** | Tap a stored boarding-pass image → full-bleed QR for gate scanning, max brightness. | Small |
 | **Recurring / template trips** | "Same as last year" — clone a trip with dates shifted. | Small |
-| **Notifications** | ESTA / passport / visa-doc expiry reminders; check-in windows. Needs a scheduled function + email or push. | Medium |
+| **Notifications** | Push/email versions of the expiry warnings that are currently only shown inline (passport, ESTA, visa-doc); check-in windows. Needs a scheduled function + email or push. | Medium |
+| **Global per-country annual-cap dataset** | Right now a calendar-year cap (e.g. India's 180/yr) only shows up if the user's own uploaded visa document states one — deliberately not hardcoded per-country, since a global "who caps what, how, and when it resets" table for 190+ countries isn't something we can keep truthful. Worth revisiting if it turns out to matter for countries people don't upload a visa doc for. | Large, and honestly might not be worth the accuracy risk |
+| **Tax-residency day counter (183-day rule)** | The thing that actually bites digital nomads — not overstay, but accidentally tripping tax residency. Every country counts differently (calendar year vs. rolling 12mo, physical-presence tests, treaty tie-breakers), so this should be a passive "you've spent N days in country X this year" counter with a strong disclaimer, never a computed verdict. Real legal-liability surface — think carefully before building. | Medium, high care needed |
 | **Refresh visa data** | Dataset is from Feb 2026. Run `scripts/update-visa-data.sh` every few months and commit. | Trivial, manual |
 | **iCal export / import** | Subscribe to a trip as a calendar; import flights from a `.ics`. | Small–Medium |
 | **Per-stay / per-leg map preview** | Small static map thumbnail on each card (needs a tile source or static-map API). | Small |

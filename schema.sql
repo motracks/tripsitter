@@ -85,6 +85,12 @@ create table if not exists travel_docs (
 -- for that country (see computeVisa() in index.html).
 alter table travel_docs add column if not exists max_stay_days integer;
 
+-- A separate cumulative calendar-year cap some visas state (e.g. India's
+-- e-Visa: 180 days per calendar year, on top of the 90-day per-entry limit
+-- above). Used to total nights across ALL of a user's trips to that country
+-- for the given year (see annualCapStatus() in index.html).
+alter table travel_docs add column if not exists annual_cap_days integer;
+
 -- Attachments (ticket / QR / doc scans) live in the private `tickets`
 -- storage bucket; the row holds the object paths only. attachment_paths is
 -- the current column (multiple images); attachment_path is the legacy
