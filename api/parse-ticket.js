@@ -60,7 +60,15 @@ Return a JSON object with any of these keys you can determine:
   status: e.g. "Approved", "Active", "Pending"
   expires_on: ISO date
   reference_number: application / reference / policy number
-  notes: anything else useful`,
+  max_stay_days: for a Visa only — the maximum CONTINUOUS stay permitted per
+        entry, in days, as a plain number (e.g. a line reading "continuous
+        stay ... should not exceed 90 days" → 90). This is the per-entry limit,
+        not a total/annual cap across multiple entries (e.g. ignore a separate
+        "maximum stay during one calendar year restricted to 180 days" line —
+        that is not what this field means). Omit if the document doesn't state
+        a per-entry day limit.
+  notes: anything else useful, including any annual/total stay cap that
+        max_stay_days did not capture`,
 };
 
 // Tried in order; first that responds wins. Flash-tier vision models
