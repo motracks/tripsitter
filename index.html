@@ -1339,6 +1339,7 @@ async function openTrip(tripId) {
   show('detail');
   document.querySelectorAll('.tab').forEach((t, i) => t.classList.toggle('active', i === 0));
   document.querySelectorAll('#detail .panel').forEach((p, i) => p.classList.toggle('active', i === 0));
+  invalidateComplianceCache();
 
   const [{ data: trip }, { data: stays }, { data: transport }, { data: user }] = await Promise.all([
     sb.from('trips').select('*').eq('id', tripId).single(),
@@ -1562,6 +1563,81 @@ function visaPortal(cc, status, citizenName) {
 }
 const EU_SCHENGEN = new Set(['AT','BE','HR','CZ','DK','EE','FI','FR','DE','GR','HU','IS','IT','LV','LI','LT','LU','MT','NL','NO','PL','PT','SK','SI','ES','SE','CH']);
 
+// ── Nomad day-counting: rolling / calendar-year presence across ALL trips ──
+// All of the user's trips are needed here (not just the open one), since a
+// bloc or annual cap is spent across every trip that touched it. Fetched
+// once per detail-view visit and cached on this module-level array.
+let allTripsForCompliance = null;
+async function loadAllTripsForCompliance() {
+  if (allTripsForCompliance) return allTripsForCompliance;
+  const { data } = await sb.from('trips').select('id,start_date,end_date,country_codes');
+  allTripsForCompliance = data || [];
+  return allTripsForCompliance;
+}
+function invalidateComplianceCache() { allTripsForCompliance = null; }
+
+const DAY_MS = 86400000;
+const toDay = (d) => { const t = new Date(String(d).slice(0, 10) + 'T00:00:00Z'); return Number.isNaN(+t) ? null : t; };
+
+// Nights spent across `trips` whose country_codes intersect `scopeCcs`,
+// overlapping the inclusive [windowStart, windowEnd] date range. A trip
+// tagged with any country in scope counts its whole date range — TripSitter
+// doesn't track which days of a multi-country trip were spent where.
+function nightsInWindowForScope(trips, scopeCcs, windowStart, windowEnd) {
+  let total = 0;
+  for (const t of trips || []) {
+    if (!(t.country_codes || []).some(cc => scopeCcs.has(cc))) continue;
+    const s = toDay(t.start_date), e = toDay(t.end_date || t.start_date);
+    if (!s || !e) continue;
+    const from = s > windowStart ? s : windowStart;
+    const to = e < windowEnd ? e : windowEnd;
+    if (to >= from) total += Math.round((to - from) / DAY_MS) + 1;
+  }
+  return total;
+}
+
+// Schengen 90/180: days spent in the bloc in the rolling 180-day window
+// ending on asOfDate (typically the trip's last day), across every trip.
+function schengenStatus(trips, asOfDate) {
+  const end = toDay(asOfDate);
+  if (!end) return null;
+  const start = new Date(end.getTime() - 179 * DAY_MS);
+  const days = nightsInWindowForScope(trips, EU_SCHENGEN, start, end);
+  return { days, cap: 90, remaining: Math.max(0, 90 - days), windowStart: start, windowEnd: end };
+}
+
+// A single country's calendar-year cap (e.g. India's e-Visa: 180 days in one
+// calendar year) — sourced from the matching visa document's annual_cap_days,
+// never from a hardcoded per-country table. Year = the year of asOfDate.
+function annualCapStatus(trips, cc, asOfDate, capDays) {
+  const ref = toDay(asOfDate);
+  if (!ref || capDays == null) return null;
+  const year = ref.getUTCFullYear();
+  const start = new Date(Date.UTC(year, 0, 1));
+  const end = new Date(Date.UTC(year, 11, 31));
+  const days = nightsInWindowForScope(trips, new Set([cc]), start, end);
+  return { days, cap: capDays, remaining: Math.max(0, capDays - days), year };
+}
+
+// Rendered Schengen 90/180 card — shown once per trip (not per country) when
+// any tagged destination is in the bloc.
+function schengenBlockHTML(trips, asOfDate) {
+  const s = schengenStatus(trips, asOfDate);
+  if (!s) return '';
+  const pct = Math.min((s.days / s.cap) * 100, 100);
+  const tone = s.days >= s.cap ? 'vb-red' : (s.days >= s.cap * 0.8 ? 'vb-amber' : 'vb-green');
+  const barColor = tone === 'vb-red' ? 'var(--red)' : tone === 'vb-amber' ? 'var(--amber)' : 'var(--green)';
+  return `<div class="visa-block info-card">
+    <div class="vb-country">🇪🇺 Schengen 90/180 rule</div>
+    <div class="vb-line">Counted across the whole Schengen bloc as one, not per-country.</div>
+    <div class="vb-line" style="margin-top:8px">Rolling 180-day window ending ${fmtDateY(String(s.windowEnd.toISOString().slice(0, 10)))}: <b>${s.cap} days</b></div>
+    <div class="vb-line">Days spent in Schengen (all trips): ${s.days}
+      <div class="vb-bar-wrap"><div class="vb-bar" style="width:${pct}%;background:${barColor}"></div></div>
+      ${s.days >= s.cap ? '<b style="color:var(--red)">exceeds the 90/180 limit</b>' : s.days >= s.cap * 0.8 ? '<span style="color:var(--amber)">close to the limit</span>' : `${s.remaining} days left in this window`}
+    </div>
+  </div>`;
+}
+
 // True if a travel_docs.country value (free text or ISO-2) refers to destCC.
 function countryMatches(docCountry, destCC) {
   if (!docCountry || !destCC) return false;
@@ -1584,7 +1660,8 @@ function computeVisa(destCC) {
     d.doc_type === 'Visa' && countryMatches(d.country, destCC) && /approved|active|valid|granted|issued/i.test(d.status || ''));
   if (docMatch) {
     const days = docMatch.max_stay_days != null && docMatch.max_stay_days !== '' ? Number(docMatch.max_stay_days) : null;
-    return { status: 'approved visa', label: 'Approved visa', tone: 'green', days, viaDocument: true };
+    const annualCapDays = docMatch.annual_cap_days != null && docMatch.annual_cap_days !== '' ? Number(docMatch.annual_cap_days) : null;
+    return { status: 'approved visa', label: 'Approved visa', tone: 'green', days, viaDocument: true, annualCapDays };
   }
 
   let best = null;
@@ -1800,6 +1877,9 @@ async function renderVisa(docs, trip) {
     guidance = `<div class="visa-block"><div class="vb-line">Tag this trip's destination with a country to see visa requirements.</div></div>`;
   } else {
     const primary = cits[0];
+    const complianceTrips = await loadAllTripsForCompliance();
+    const asOfDate = trip?.end_date || trip?.start_date || new Date().toISOString().slice(0, 10);
+
     guidance = `<div class="section-label" style="margin-top:0">Entry — travelling on ${flagEmoji(primary)} ${esc(COUNTRY_NAME[primary] || primary)}${cits.length > 1 ? ` (+${cits.length - 1})` : ''}</div>` +
       ccs.map(cc => {
         const v = computeVisa(cc);
@@ -1818,6 +1898,25 @@ async function renderVisa(docs, trip) {
         } else if (v.viaDocument && tripDays != null) {
           bar = `<div class="vb-line">This trip: ${tripDays} days — add the allowed stay length on your visa document to check it against this trip.</div>`;
         }
+
+        // Calendar-year cap (e.g. India: 180 days/year) — sourced from the
+        // visa document itself, summed across ALL trips tagged with this
+        // country, not just the one open here.
+        let annualBar = '';
+        if (v.annualCapDays != null) {
+          const a = annualCapStatus(complianceTrips, cc, asOfDate, v.annualCapDays);
+          if (a) {
+            const pct = Math.min((a.days / a.cap) * 100, 100);
+            const tone = a.days >= a.cap ? 'vb-red' : (a.days >= a.cap * 0.8 ? 'vb-amber' : 'vb-green');
+            const barColor = tone === 'vb-red' ? 'var(--red)' : tone === 'vb-amber' ? 'var(--amber)' : 'var(--green)';
+            annualBar = `<div class="vb-line" style="margin-top:8px">Calendar-year cap (${a.year}): <b>${a.cap} days</b></div>
+              <div class="vb-line">Used across all trips: ${a.days} days
+                <div class="vb-bar-wrap"><div class="vb-bar" style="width:${pct}%;background:${barColor}"></div></div>
+                ${a.days >= a.cap ? '<b style="color:var(--red)">exceeds the calendar-year cap</b>' : a.days >= a.cap * 0.8 ? '<span style="color:var(--amber)">close to the cap</span>' : `${a.remaining} days left this year`}
+              </div>`;
+          }
+        }
+
         const primaryName = COUNTRY_NAME[primary] || primary;
         const explain = VISA_EXPLAIN[v.status];
         const portal = v.status === 'visa free' || v.status === 'visa on arrival' || v.viaDocument
@@ -1831,6 +1930,7 @@ async function renderVisa(docs, trip) {
           ${v.viaDocument ? `<div class="vb-line">Based on the approved visa in your documents below.</div>` : ''}
           ${passportNote}
           ${bar}
+          ${annualBar}
           <div class="ic-details">
             ${explain ? `<div class="vb-line">${esc(explain.how)}</div>` : ''}
             ${v.days != null ? `<div class="vb-line">Permitted stay on this basis: <b>${v.days} days</b> per entry.</div>` : ''}
@@ -1838,17 +1938,28 @@ async function renderVisa(docs, trip) {
             <div class="vb-line"><a href="https://www.google.com/search?q=${encodeURIComponent((COUNTRY_NAME[cc] || cc) + ' entry requirements ' + primaryName + ' citizens official government')}" target="_blank" rel="noopener">full official requirements ↗</a></div>
           </div>
         </div>`;
-      }).join('');
+      }).join('') +
+      (ccs.some(cc => EU_SCHENGEN.has(cc)) ? schengenBlockHTML(complianceTrips, asOfDate) : '');
   }
 
   // ── Your documents (existing travel_docs CRUD) ─────────────
   const docsHTML = docs.length ? docs.map(d => {
     const days = tripDays;
+    // Passport expiry: many countries require 3–6 months' validity beyond
+    // travel, so flag inside that window, not just once actually expired.
+    const passportWarn = d.doc_type === 'Passport' && d.expires_on ? (() => {
+      const left = Math.round((toDay(d.expires_on) - toDay(new Date().toISOString().slice(0, 10))) / DAY_MS);
+      if (left < 0) return { tone: 'var(--red)', text: `expired ${Math.abs(left)} days ago — renew before travelling` };
+      if (left <= 180) return { tone: 'var(--amber)', text: `expires in ${left} days — many countries require 3–6 months' validity beyond your travel dates` };
+      return null;
+    })() : null;
     const rows = [
       d.status && `<div class="detail-row"><span class="detail-label">Status</span><span class="detail-value">${esc(d.status)}</span></div>`,
       d.expires_on && `<div class="detail-row"><span class="detail-label">Expires</span><span class="detail-value">${esc(fmtDateY(d.expires_on))}</span></div>`,
+      passportWarn && `<div class="detail-row"><span class="detail-label">⚠</span><span class="detail-value" style="color:${passportWarn.tone}">${esc(passportWarn.text)}</span></div>`,
       d.reference_number && `<div class="detail-row"><span class="detail-label">Reference</span><span class="detail-value" style="display:flex;align-items:center;gap:6px;font-family:'DM Mono',monospace">${esc(d.reference_number)} <button class="copy-btn" onclick="event.stopPropagation();copyText('${esc(d.reference_number)}',this)">copy</button></span></div>`,
       d.doc_type === 'Visa' && d.max_stay_days != null && `<div class="detail-row"><span class="detail-label">Allowed stay</span><span class="detail-value">${esc(d.max_stay_days)} days</span></div>`,
+      d.doc_type === 'Visa' && d.annual_cap_days != null && `<div class="detail-row"><span class="detail-label">Per calendar year</span><span class="detail-value">${esc(d.annual_cap_days)} days</span></div>`,
       d.doc_type === 'ESTA' && days != null && `<div class="detail-row"><span class="detail-label">This trip</span><span class="detail-value">${days} days used</span></div>`,
       d.notes && `<div class="detail-row"><span class="detail-label">Notes</span><span class="detail-value">${esc(d.notes)}</span></div>`,
       attachmentRow(d),
@@ -1856,7 +1967,7 @@ async function renderVisa(docs, trip) {
     return `<div class="info-card" onclick="toggleCard(this)">
       <div class="ic-header">
         <div><div class="ic-city">${esc(d.doc_type || 'Document')}</div><div class="ic-dates">${esc(d.country || '')}</div></div>
-        <span class="ic-tag">${esc(d.status || '')}</span>
+        <span class="ic-tag"${passportWarn ? ` style="background:${passportWarn.tone}"` : ''}>${passportWarn ? '⚠ ' : ''}${esc(d.status || '')}</span>
       </div>
       <div class="ic-details">${rows}
         <div class="card-actions"><button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();editDoc('${d.id}')">edit</button></div>
@@ -2373,6 +2484,7 @@ const DOC_FIELDS = [
   { key: 'country', label: 'Country', type: 'text' },
   { key: 'status', label: 'Status', type: 'text' },
   { key: 'max_stay_days', label: 'Allowed stay (days) — overrides the visa-free limit on the entry tab', type: 'number', showIf: { field: 'doc_type', in: ['Visa'] } },
+  { key: 'annual_cap_days', label: 'Max days per calendar year (if the visa states one, e.g. 180)', type: 'number', showIf: { field: 'doc_type', in: ['Visa'] } },
   { key: 'expires_on', label: 'Expires', type: 'date' },
   { key: 'reference_number', label: 'Reference number', type: 'text' },
   { key: 'notes', label: 'Notes', type: 'textarea' },

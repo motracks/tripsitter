@@ -67,8 +67,13 @@ Return a JSON object with any of these keys you can determine:
         "maximum stay during one calendar year restricted to 180 days" line —
         that is not what this field means). Omit if the document doesn't state
         a per-entry day limit.
-  notes: anything else useful, including any annual/total stay cap that
-        max_stay_days did not capture`,
+  annual_cap_days: for a Visa only — a separate total/cumulative stay limit
+        per calendar year stated on the document, as a plain number (e.g.
+        "maximum stay ... during one calendar year restricted to 180 days" →
+        180). This is distinct from max_stay_days (per-entry) — only fill
+        this when the document states a calendar-year or 12-month cumulative
+        cap. Omit if none is stated.
+  notes: anything else useful that the two fields above didn't capture`,
 };
 
 // Tried in order; first that responds wins. Flash-tier vision models
