@@ -1562,13 +1562,30 @@ function visaPortal(cc, status, citizenName) {
 }
 const EU_SCHENGEN = new Set(['AT','BE','HR','CZ','DK','EE','FI','FR','DE','GR','HU','IS','IT','LV','LI','LT','LU','MT','NL','NO','PL','PT','SK','SI','ES','SE','CH']);
 
+// True if a travel_docs.country value (free text or ISO-2) refers to destCC.
+function countryMatches(docCountry, destCC) {
+  if (!docCountry || !destCC) return false;
+  const dc = String(docCountry).trim();
+  if (dc.toUpperCase() === destCC.toUpperCase()) return true;
+  const name = COUNTRY_NAME[destCC];
+  return !!name && dc.toLowerCase() === name.toLowerCase();
+}
+
 // Best requirement for one destination across the traveller's passports,
-// with a residency/long-stay permission overriding to "resident".
+// with a residency/long-stay permission overriding to "resident", and an
+// approved visa on file overriding to that visa's own permitted stay length.
 function computeVisa(destCC) {
   if (!destCC || !visaData) return null;
   const cits = (currentProfile?.citizenships || []).filter(Boolean);
   const perm = (currentPermissions || []).find(p => p.country === destCC);
   if (perm) return { status: 'resident', label: `${perm.label || perm.kind}`, tone: 'green', days: null, viaPermission: true };
+
+  const docMatch = (currentDocs || []).find(d =>
+    d.doc_type === 'Visa' && countryMatches(d.country, destCC) && /approved|active|valid|granted|issued/i.test(d.status || ''));
+  if (docMatch) {
+    const days = docMatch.max_stay_days != null && docMatch.max_stay_days !== '' ? Number(docMatch.max_stay_days) : null;
+    return { status: 'approved visa', label: 'Approved visa', tone: 'green', days, viaDocument: true };
+  }
 
   let best = null;
   for (const c of cits) {
@@ -1789,18 +1806,21 @@ async function renderVisa(docs, trip) {
         if (!v) return `<div class="visa-block"><div class="vb-country">${flagEmoji(cc)} ${esc(COUNTRY_NAME[cc] || cc)}</div><div class="vb-line">No data for this destination — check the official government site.</div></div>`;
         let bar = '';
         if (v.days != null && tripDays != null) {
+          const label = v.viaDocument ? 'Allowed stay (your visa)' : 'Max visa-free stay';
           const pct = Math.min((tripDays / v.days) * 100, 100);
           const tone = tripDays >= v.days ? 'vb-red' : (tripDays >= v.days * 0.8 ? 'vb-amber' : 'vb-green');
           const barColor = tone === 'vb-red' ? 'var(--red)' : tone === 'vb-amber' ? 'var(--amber)' : 'var(--green)';
-          bar = `<div class="vb-line">Max visa-free stay: <b>${v.days} days</b></div>
+          bar = `<div class="vb-line">${label}: <b>${v.days} days</b></div>
             <div class="vb-line">This trip: ${tripDays} days
               <div class="vb-bar-wrap"><div class="vb-bar" style="width:${pct}%;background:${barColor}"></div></div>
-              ${tripDays >= v.days ? '<b style="color:var(--red)">exceeds the visa-free limit</b>' : tripDays >= v.days * 0.8 ? '<span style="color:var(--amber)">close to the limit</span>' : 'well within'}
+              ${tripDays >= v.days ? `<b style="color:var(--red)">exceeds ${v.viaDocument ? 'your visa\'s' : 'the visa-free'} limit</b>` : tripDays >= v.days * 0.8 ? '<span style="color:var(--amber)">close to the limit</span>' : 'well within'}
             </div>`;
+        } else if (v.viaDocument && tripDays != null) {
+          bar = `<div class="vb-line">This trip: ${tripDays} days — add the allowed stay length on your visa document to check it against this trip.</div>`;
         }
         const primaryName = COUNTRY_NAME[primary] || primary;
         const explain = VISA_EXPLAIN[v.status];
-        const portal = v.status === 'visa free' || v.status === 'visa on arrival'
+        const portal = v.status === 'visa free' || v.status === 'visa on arrival' || v.viaDocument
           ? null : visaPortal(cc, v.status, primaryName);
         const passportNote = v.passport && v.passport !== primary
           ? `<div class="vb-line">Best on your ${flagEmoji(v.passport)} ${esc(COUNTRY_NAME[v.passport])} passport.</div>` : '';
@@ -1808,6 +1828,7 @@ async function renderVisa(docs, trip) {
           <div class="vb-country">${flagEmoji(cc)} ${esc(COUNTRY_NAME[cc] || cc)}
             <span class="visa-badge vb-${v.tone}">${esc(v.label)}</span></div>
           ${v.viaPermission ? `<div class="vb-line">You hold <b>${esc(v.label)}</b> — the visa rules below may not apply to you.</div>` : ''}
+          ${v.viaDocument ? `<div class="vb-line">Based on the approved visa in your documents below.</div>` : ''}
           ${passportNote}
           ${bar}
           <div class="ic-details">
@@ -1827,6 +1848,7 @@ async function renderVisa(docs, trip) {
       d.status && `<div class="detail-row"><span class="detail-label">Status</span><span class="detail-value">${esc(d.status)}</span></div>`,
       d.expires_on && `<div class="detail-row"><span class="detail-label">Expires</span><span class="detail-value">${esc(fmtDateY(d.expires_on))}</span></div>`,
       d.reference_number && `<div class="detail-row"><span class="detail-label">Reference</span><span class="detail-value" style="display:flex;align-items:center;gap:6px;font-family:'DM Mono',monospace">${esc(d.reference_number)} <button class="copy-btn" onclick="event.stopPropagation();copyText('${esc(d.reference_number)}',this)">copy</button></span></div>`,
+      d.doc_type === 'Visa' && d.max_stay_days != null && `<div class="detail-row"><span class="detail-label">Allowed stay</span><span class="detail-value">${esc(d.max_stay_days)} days</span></div>`,
       d.doc_type === 'ESTA' && days != null && `<div class="detail-row"><span class="detail-label">This trip</span><span class="detail-value">${days} days used</span></div>`,
       d.notes && `<div class="detail-row"><span class="detail-label">Notes</span><span class="detail-value">${esc(d.notes)}</span></div>`,
       attachmentRow(d),
@@ -2350,6 +2372,7 @@ const DOC_FIELDS = [
   { key: 'doc_type', label: 'Type', type: 'select', options: ['ESTA', 'Visa', 'Global Entry', 'Passport', 'Vaccination', 'Insurance', 'other'] },
   { key: 'country', label: 'Country', type: 'text' },
   { key: 'status', label: 'Status', type: 'text' },
+  { key: 'max_stay_days', label: 'Allowed stay (days) — overrides the visa-free limit on the entry tab', type: 'number', showIf: { field: 'doc_type', in: ['Visa'] } },
   { key: 'expires_on', label: 'Expires', type: 'date' },
   { key: 'reference_number', label: 'Reference number', type: 'text' },
   { key: 'notes', label: 'Notes', type: 'textarea' },
