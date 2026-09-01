@@ -80,6 +80,11 @@ create table if not exists travel_docs (
   notes            text
 );
 
+-- For an approved Visa document, the stay length it actually grants — used
+-- to override the static visa-free-days allowance shown on the entry tab
+-- for that country (see computeVisa() in index.html).
+alter table travel_docs add column if not exists max_stay_days integer;
+
 -- Attachments (ticket / QR / doc scans) live in the private `tickets`
 -- storage bucket; the row holds the object paths only. attachment_paths is
 -- the current column (multiple images); attachment_path is the legacy
