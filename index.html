@@ -1563,6 +1563,20 @@ function visaPortal(cc, status, citizenName) {
 }
 const EU_SCHENGEN = new Set(['AT','BE','HR','CZ','DK','EE','FI','FR','DE','GR','HU','IS','IT','LV','LI','LT','LU','MT','NL','NO','PL','PT','SK','SI','ES','SE','CH']);
 
+// Some visa-on-arrival / e-visa statuses aren't a single fixed limit — the
+// traveller picks between a few durations at different prices. Curated by
+// hand like VISA_PORTAL above: incomplete by design, missing entries just
+// render nothing. The passport-index dataset's own `days` figure is always
+// the longest/most-permissive of these tiers.
+const VISA_OPTIONS = {
+  'NP|visa on arrival': [
+    { days: 15, fee: '$30' },
+    { days: 30, fee: '$50' },
+    { days: 90, fee: '$125' },
+  ],
+};
+function visaOptionsFor(cc, status) { return VISA_OPTIONS[`${cc}|${status}`] || null; }
+
 // ── Nomad day-counting: rolling / calendar-year presence across ALL trips ──
 // All of the user's trips are needed here (not just the open one), since a
 // bloc or annual cap is spent across every trip that touched it. Fetched
@@ -1919,6 +1933,7 @@ async function renderVisa(docs, trip) {
 
         const primaryName = COUNTRY_NAME[primary] || primary;
         const explain = VISA_EXPLAIN[v.status];
+        const options = visaOptionsFor(cc, v.status);
         const portal = v.status === 'visa free' || v.status === 'visa on arrival' || v.viaDocument
           ? null : visaPortal(cc, v.status, primaryName);
         const passportNote = v.passport && v.passport !== primary
@@ -1955,6 +1970,7 @@ async function renderVisa(docs, trip) {
           <div class="ic-details">
             ${docSummary}
             ${explain ? `<div class="vb-line">${esc(explain.how)}</div>` : ''}
+            ${options ? `<div class="vb-line">Options at the border: ${options.map(o => `<b>${o.days} days</b> (${esc(o.fee)})`).join(' · ')} — multiple-entry rates, confirm current fees officially.</div>` : ''}
             ${v.days != null ? `<div class="vb-line">Permitted stay on this basis: <b>${v.days} days</b> per entry.</div>` : ''}
             ${portal ? `<div class="vb-line"><a href="${portal.url}" target="_blank" rel="noopener">${portal.label}</a></div>` : ''}
             <div class="vb-line"><a href="https://www.google.com/search?q=${encodeURIComponent((COUNTRY_NAME[cc] || cc) + ' entry requirements ' + primaryName + ' citizens official government')}" target="_blank" rel="noopener">full official requirements ↗</a></div>
@@ -1965,7 +1981,14 @@ async function renderVisa(docs, trip) {
   }
 
   // ── Your documents (existing travel_docs CRUD) ─────────────
-  const docsHTML = docs.length ? docs.map(d => {
+  // Relevance first: documents matching one of this trip's tagged countries
+  // float to the top (in the order those countries are tagged), then
+  // everything else keeps its original order.
+  const sortedDocs = docs.slice().sort((a, b) => {
+    const rank = (d) => { const i = ccs.findIndex(cc => countryMatches(d.country, cc)); return i === -1 ? ccs.length : i; };
+    return rank(a) - rank(b);
+  });
+  const docsHTML = sortedDocs.length ? sortedDocs.map(d => {
     const days = tripDays;
     // Passport expiry: many countries require 3–6 months' validity beyond
     // travel, so flag inside that window, not just once actually expired.
