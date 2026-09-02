@@ -1661,7 +1661,7 @@ function computeVisa(destCC) {
   if (docMatch) {
     const days = docMatch.max_stay_days != null && docMatch.max_stay_days !== '' ? Number(docMatch.max_stay_days) : null;
     const annualCapDays = docMatch.annual_cap_days != null && docMatch.annual_cap_days !== '' ? Number(docMatch.annual_cap_days) : null;
-    return { status: 'approved visa', label: 'Approved visa', tone: 'green', days, viaDocument: true, annualCapDays };
+    return { status: 'approved visa', label: 'Approved visa', tone: 'green', days, viaDocument: true, annualCapDays, doc: docMatch };
   }
 
   let best = null;
@@ -1923,15 +1923,37 @@ async function renderVisa(docs, trip) {
           ? null : visaPortal(cc, v.status, primaryName);
         const passportNote = v.passport && v.passport !== primary
           ? `<div class="vb-line">Best on your ${flagEmoji(v.passport)} ${esc(COUNTRY_NAME[v.passport])} passport.</div>` : '';
+
+        // The matching document, surfaced right here instead of making you
+        // go find it in Your documents below — everything for this country
+        // in one place.
+        const docSummary = v.viaDocument && v.doc ? (() => {
+          const d = v.doc;
+          const rows = [
+            d.status && `<div class="detail-row"><span class="detail-label">Status</span><span class="detail-value">${esc(d.status)}</span></div>`,
+            d.expires_on && `<div class="detail-row"><span class="detail-label">Expires</span><span class="detail-value">${esc(fmtDateY(d.expires_on))}</span></div>`,
+            d.reference_number && `<div class="detail-row"><span class="detail-label">Reference</span><span class="detail-value" style="font-family:'DM Mono',monospace">${esc(d.reference_number)}</span></div>`,
+            d.notes && `<div class="detail-row"><span class="detail-label">Notes</span><span class="detail-value">${esc(d.notes)}</span></div>`,
+            attachmentRow(d),
+          ].filter(Boolean).join('');
+          return `<div class="vb-line" style="margin-top:8px;padding-top:8px;border-top:0.5px solid var(--border)">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
+              <span class="section-label" style="margin:0">Your visa document</span>
+              <button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();editDoc('${d.id}')">edit</button>
+            </div>
+            ${rows}
+          </div>`;
+        })() : '';
+
         return `<div class="visa-block info-card" onclick="toggleCard(this)" style="cursor:pointer">
           <div class="vb-country">${flagEmoji(cc)} ${esc(COUNTRY_NAME[cc] || cc)}
             <span class="visa-badge vb-${v.tone}">${esc(v.label)}</span></div>
           ${v.viaPermission ? `<div class="vb-line">You hold <b>${esc(v.label)}</b> — the visa rules below may not apply to you.</div>` : ''}
-          ${v.viaDocument ? `<div class="vb-line">Based on the approved visa in your documents below.</div>` : ''}
           ${passportNote}
           ${bar}
           ${annualBar}
           <div class="ic-details">
+            ${docSummary}
             ${explain ? `<div class="vb-line">${esc(explain.how)}</div>` : ''}
             ${v.days != null ? `<div class="vb-line">Permitted stay on this basis: <b>${v.days} days</b> per entry.</div>` : ''}
             ${portal ? `<div class="vb-line"><a href="${portal.url}" target="_blank" rel="noopener">${portal.label}</a></div>` : ''}
