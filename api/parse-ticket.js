@@ -8,6 +8,8 @@
 // those are visible on the ticket. (Google's consumer AI Studio tier may use
 // submitted data to improve their products; a paid API tier does not.)
 
+import { MODELS, callGeminiWithRetry } from './_gemini.js';
+
 const COMMON = `
 The image(s) may be a photo, a screenshot, or a forwarded email with the
 details buried in prose. Read everything, including body text. Be decisive:
@@ -96,10 +98,6 @@ Return a JSON object with any of these keys you can determine:
   notes: anything else useful that the two fields above didn't capture`,
 };
 
-// Tried in order; first that responds wins. Flash-tier vision models
-// confirmed available on the project's key (see GET ?models).
-const MODELS = ['gemini-2.5-flash', 'gemini-flash-latest', 'gemini-3.5-flash'];
-
 async function readBody(req) {
   if (req.body && typeof req.body === 'object') return req.body;
   if (typeof req.body === 'string') { try { return JSON.parse(req.body); } catch { return {}; } }
@@ -166,18 +164,9 @@ export default async function handler(req, res) {
 
     let lastErr = null;
     for (const model of MODELS) {
-      const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
-      const gres = await fetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-goog-api-key': key },
-        body: JSON.stringify(payload),
-      });
-      if (!gres.ok) {
-        lastErr = { status: gres.status, body: (await gres.text()).slice(0, 300) };
-        console.error('parse-ticket: gemini', model, gres.status, lastErr.body);
-        continue;
-      }
-      const j = await gres.json();
+      const attempt = await callGeminiWithRetry(model, payload, key, 'parse-ticket');
+      if (!attempt.ok) { lastErr = attempt.err; continue; }
+      const j = await attempt.gres.json();
       const text = (j?.candidates?.[0]?.content?.parts || []).map((p) => p.text || '').join('');
       let parsed = {};
       try {

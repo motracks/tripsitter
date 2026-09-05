@@ -6,6 +6,8 @@
 // GDPR note: same as parse-ticket.js — the image is held in memory for this
 // request only, never written to disk or logged.
 
+import { MODELS, callGeminiWithRetry } from './_gemini.js';
+
 const PROMPT = `Look at this image of a travel ticket, boarding pass, or
 booking confirmation. Find the single most prominent scannable QR code or
 barcode in it (the kind a gate agent or conductor would scan) — ignore small
@@ -20,8 +22,6 @@ fraction of the image height/width (top-left origin), tight around the
 code's printed border/quiet-zone but not cropping into it.
 If no scannable QR code or barcode is visible anywhere in the image, return
 an empty array: []`;
-
-const MODELS = ['gemini-2.5-flash', 'gemini-flash-latest', 'gemini-3.5-flash'];
 
 async function readBody(req) {
   if (req.body && typeof req.body === 'object') return req.body;
@@ -55,18 +55,9 @@ export default async function handler(req, res) {
 
     let lastErr = null;
     for (const model of MODELS) {
-      const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
-      const gres = await fetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-goog-api-key': key },
-        body: JSON.stringify(payload),
-      });
-      if (!gres.ok) {
-        lastErr = { status: gres.status, body: (await gres.text()).slice(0, 300) };
-        console.error('detect-qr: gemini', model, gres.status, lastErr.body);
-        continue;
-      }
-      const j = await gres.json();
+      const attempt = await callGeminiWithRetry(model, payload, key, 'detect-qr');
+      if (!attempt.ok) { lastErr = attempt.err; continue; }
+      const j = await attempt.gres.json();
       const text = (j?.candidates?.[0]?.content?.parts || []).map((p) => p.text || '').join('');
       let boxes = [];
       try {
