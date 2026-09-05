@@ -237,6 +237,17 @@
   .attach-chip .x { background: none; border: 0; color: var(--muted); cursor: pointer; font-size: 13px; line-height: 1; padding: 0 2px; }
   .attach-chip .x:hover { color: var(--red); }
   .parse-note { font-size: 10px; color: var(--amber); font-family: 'DM Mono', monospace; margin-top: 6px; }
+  .attach-thumb { cursor: zoom-in; }
+
+  /* IMAGE LIGHTBOX — full-size preview for QR codes / tickets, sized to be
+     camera-scannable (like a wallet pass) rather than a tiny thumbnail. */
+  #img-lightbox { position: fixed; inset: 0; background: rgba(0,0,0,0.92); display: flex;
+    align-items: center; justify-content: center; padding: 6vh 5vw; z-index: 60; cursor: zoom-out; }
+  #img-lightbox img { max-width: min(92vw, 520px); max-height: 78vh; width: auto; height: auto;
+    background: #fff; padding: 22px; border-radius: 18px; box-shadow: 0 24px 70px rgba(0,0,0,0.55);
+    animation: fadeUp 0.15s ease both; }
+  #img-lightbox .lightbox-hint { position: absolute; top: 3vh; left: 0; right: 0; text-align: center;
+    font-family: 'DM Mono', monospace; font-size: 11px; color: rgba(255,255,255,0.6); }
 
   /* ONBOARDING / SETTINGS */
   #onboarding { max-width: 460px; margin: 8vh auto 0; padding: 0 1.25rem 3rem; }
@@ -439,6 +450,10 @@
 </div>
 
 <div id="modal" class="hidden"></div>
+<div id="img-lightbox" class="hidden" onclick="closeImagePreview()">
+  <div class="lightbox-hint">tap to close</div>
+  <img id="img-lightbox-img" src="" alt="attachment, full size">
+</div>
 
 <script type="module">
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
@@ -1395,10 +1410,21 @@ async function hydrateAttachments(container) {
   for (const slot of slots) {
     const { data } = await sb.storage.from('tickets').createSignedUrl(slot.dataset.path, 3600);
     slot.outerHTML = data?.signedUrl
-      ? `<a href="${data.signedUrl}" target="_blank" rel="noopener"><img class="attach-thumb" src="${data.signedUrl}" alt="attachment"></a>`
+      ? `<img class="attach-thumb" src="${data.signedUrl}" alt="attachment — tap to enlarge" onclick="event.stopPropagation();openImagePreview('${esc(data.signedUrl)}')">`
       : '<span class="attach-chip">image unavailable</span>';
   }
 }
+// Full-size attachment preview — big and high-contrast enough that a QR
+// code or barcode on it can be scanned straight off the screen, the way
+// Apple Wallet expands a pass.
+window.openImagePreview = function (url) {
+  $('img-lightbox-img').src = url;
+  $('img-lightbox').classList.remove('hidden');
+};
+window.closeImagePreview = function () {
+  $('img-lightbox').classList.add('hidden');
+  $('img-lightbox-img').src = '';
+};
 
 // Currency-sign picker: a <select> styled as a pill. `onchange` name is a
 // global set per use-site. Trip-tagged currencies float to the top.
