@@ -1771,6 +1771,8 @@ function renderTimeline(stays, transport) {
       const rows = [
         t.booking_code && `<div class="detail-row"><span class="detail-label">Booking</span><span class="detail-value" style="display:flex;align-items:center;gap:6px">${esc(t.booking_code)} <button class="copy-btn" onclick="event.stopPropagation();copyText('${esc(String(t.booking_code).replace(/\s/g,''))}',this)">copy</button></span></div>`,
         t.carrier && `<div class="detail-row"><span class="detail-label">Carrier</span><span class="detail-value">${esc(t.carrier)}</span></div>`,
+        type === 'train' && t.train_number && `<div class="detail-row"><span class="detail-label">Train</span><span class="detail-value">${esc(t.train_number)}</span></div>`,
+        type === 'train' && t.track_info && `<div class="detail-row"><span class="detail-label">Track</span><span class="detail-value">${esc(t.track_info)}</span></div>`,
         t.arrival && `<div class="detail-row"><span class="detail-label">Arrives</span><span class="detail-value">${esc(fmtDT(t.arrival))}</span></div>`,
         t.price != null && `<div class="detail-row"><span class="detail-label">Price</span><span class="detail-value">${Number(t.price) === 0 ? 'free' : fmtMoney(t.price, t.currency)}</span></div>`,
         t.notes && `<div class="detail-row"><span class="detail-label">Notes</span><span class="detail-value">${esc(t.notes)}</span></div>`,
@@ -1857,6 +1859,8 @@ function renderTransport(transport) {
     const rows = [
       t.booking_code && `<div class="detail-row"><span class="detail-label">Booking</span><span class="detail-value" style="display:flex;align-items:center;gap:6px">${esc(t.booking_code)} <button class="copy-btn" onclick="event.stopPropagation();copyText('${esc(String(t.booking_code).replace(/\s/g,''))}',this)">copy</button></span></div>`,
       t.carrier && `<div class="detail-row"><span class="detail-label">Carrier</span><span class="detail-value">${esc(t.carrier)}</span></div>`,
+      (t.type || '').toLowerCase() === 'train' && t.train_number && `<div class="detail-row"><span class="detail-label">Train</span><span class="detail-value">${esc(t.train_number)}</span></div>`,
+      (t.type || '').toLowerCase() === 'train' && t.track_info && `<div class="detail-row"><span class="detail-label">Track</span><span class="detail-value">${esc(t.track_info)}</span></div>`,
       `<div class="detail-row"><span class="detail-label">Departs</span><span class="detail-value">${esc(fmtDT(t.departure))}</span></div>`,
       t.arrival && `<div class="detail-row"><span class="detail-label">Arrives</span><span class="detail-value">${esc(fmtDT(t.arrival))}</span></div>`,
       t.price != null && `<div class="detail-row"><span class="detail-label">Price</span><span class="detail-value" style="display:flex;align-items:center;gap:8px">${Number(t.price) === 0 ? 'free' : money(Number(t.price))} ${currencyPicker(t.currency || 'EUR', 'setTransportCurrency', t.id)}</span></div>`,
@@ -2351,7 +2355,14 @@ function openForm(opts) {
 
       // For every other field: don't clobber something already filled in.
       if (el.value && el.value !== '—') continue;
-      if (el.type === 'datetime-local') el.value = new Date(val).toISOString().slice(0, 16);
+      if (el.type === 'datetime-local') {
+        // Treat the parser's ISO string as the literal wall-clock time printed
+        // on the ticket — do NOT round-trip through Date(), which reinterprets
+        // a timezone-less string in the browser's own timezone and silently
+        // shifts the displayed hour when that differs from the ticket's.
+        const s = String(val);
+        el.value = s.length > 10 ? s.slice(0, 16) : s.slice(0, 10) + 'T00:00';
+      }
       else if (el.type === 'date') el.value = String(val).slice(0, 10);
       else el.value = val;
       any = true;
@@ -2411,7 +2422,10 @@ function openForm(opts) {
 
 // Downscale an image file to at most `max` px on the long edge and re-encode
 // as JPEG — keeps a ticket readable while cutting the upload from MBs to KBs.
-function shrinkImage(file, max = 1600, quality = 0.82) {
+// max/quality are kept high enough that small printed times/track numbers on
+// a screenshot stay legible to the vision model — over-downscaling here was a
+// contributor to misread departure/arrival times.
+function shrinkImage(file, max = 2200, quality = 0.9) {
   return new Promise((resolve) => {
     const img = new Image();
     img.onload = () => {
@@ -2519,6 +2533,8 @@ const TRANSPORT_FIELDS = [
   { key: 'departure', label: 'Departs', type: 'datetime', half: true },
   { key: 'arrival', label: 'Arrives', type: 'datetime', half: true },
   { key: 'carrier', label: 'Carrier', type: 'text' },
+  { key: 'train_number', label: 'Train number', type: 'text', half: true, showIf: { field: 'type', in: ['train'] } },
+  { key: 'track_info', label: 'Track / platform', type: 'text', half: true, showIf: { field: 'type', in: ['train'] } },
   { key: 'booking_code', label: 'Booking code', type: 'text' },
   { key: 'price', label: 'Price', type: 'number', half: true },
   { key: 'currency', label: 'Currency', type: 'currency', half: true },

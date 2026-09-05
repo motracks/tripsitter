@@ -16,7 +16,20 @@ blank just because it isn't in a labelled box. If several images are given,
 combine them. If there are multiple prices, pick the one that represents the
 main cost of THIS booking (ignore optional add-ons and "not included" notes).
 Dates with a written month ("September 7th 2026") → ISO. Return {} only if
-the image genuinely contains none of the requested information.`;
+the image genuinely contains none of the requested information.
+
+Read every digit of every time individually before answering — do not guess
+from the shape of the text. Times are frequently printed in 24-hour format
+(e.g. "14:32", "09:05") — copy the hour exactly as printed and never invent
+an AM/PM split for it. If a time has no minutes shown (e.g. just "14"),
+treat it as ":00". If the same time appears more than once in the image
+(e.g. once large and once small, or repeated in a summary line), cross-check
+that all copies agree; if they conflict, prefer the one printed next to an
+explicit "departs"/"arrives"/"from"/"to" label over a bare or ambiguous one.
+Do not confuse a boarding time, gate-closing time, check-in time, or duration
+("2h 15m") with the actual departure or arrival time. When a date is shown
+without a time, or a time without a date, still return whichever part is
+present rather than guessing the other.`;
 
 const SCHEMAS = {
   transport: `${COMMON}
@@ -24,13 +37,20 @@ Return a JSON object with any of these keys you can determine:
   type: one of "flight" | "bus" | "train" | "ferry" | "car"
   origin: departure city / airport / station, human readable
   destination: arrival city / airport / station
-  departure: ISO 8601 datetime (local time as printed; date-only is fine)
-  arrival: ISO 8601 datetime
-  carrier: airline / operator name, plus flight or service number
+  departure: ISO 8601 datetime — the actual departure time, not boarding/check-in
+        (local time as printed, 24-hour hour value taken verbatim; date-only is fine)
+  arrival: ISO 8601 datetime — the actual arrival time, same rules as departure
+  carrier: airline / train operator / bus company name only (not the service number)
+  train_number: for trains only — the train/service number as printed (e.g. "ICE 529",
+        "TGV 6109"). Omit for non-train transport.
+  track_info: for trains only — the departure track, platform, or gate as printed
+        (e.g. "Track 12", "Platform 4B"). Omit for non-train transport.
   booking_code: PNR / booking reference / ticket number
   price: number only (no currency symbol)
   currency: ISO 4217 code (e.g. EUR, USD, INR)
-  notes: anything useful that doesn't fit above (pickup contact, luggage, etc.)`,
+  notes: anything useful that doesn't fit above (pickup contact, luggage, etc.) —
+        for flights and buses, include the flight/service number here if not
+        already folded into carrier`,
   stay: `${COMMON}
 Return a JSON object with any of these keys you can determine:
   type: the purpose of the stay — exactly one of:

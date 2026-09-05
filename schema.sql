@@ -68,6 +68,9 @@ alter table transport add column if not exists origin_lng double precision;
 alter table transport add column if not exists dest_lat double precision;
 alter table transport add column if not exists dest_lng double precision;
 alter table transport add column if not exists geo_source text;  -- 'iata' | 'station' | 'city' | 'manual' | 'partial' | null
+-- Train-only detail: service number and departure track/platform.
+alter table transport add column if not exists train_number text;
+alter table transport add column if not exists track_info text;
 
 create table if not exists travel_docs (
   id               uuid primary key default gen_random_uuid(),
