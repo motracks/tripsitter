@@ -1398,10 +1398,11 @@ function attachmentRow(row) {
   const paths = Array.isArray(row?.attachment_paths) ? row.attachment_paths
     : (row?.attachment_path ? [row.attachment_path] : []);
   if (!paths.length) return '';
+  const qrPaths = Array.isArray(row?.qr_paths) ? row.qr_paths : [];
   return `<div class="detail-row" style="flex-direction:column;align-items:stretch">
     <span class="detail-label">Attachments</span>
     <span class="detail-value" style="text-align:left">
-      <span class="attach-gallery">${paths.map(p => `<span class="attach-slot" data-path="${esc(p)}">loading…</span>`).join('')}</span>
+      <span class="attach-gallery">${paths.map((p, i) => `<span class="attach-slot" data-path="${esc(p)}" data-qr-path="${esc(qrPaths[i] || '')}">loading…</span>`).join('')}</span>
     </span>
   </div>`;
 }
@@ -1409,8 +1410,15 @@ async function hydrateAttachments(container) {
   const slots = container.querySelectorAll('.attach-slot[data-path]');
   for (const slot of slots) {
     const { data } = await sb.storage.from('tickets').createSignedUrl(slot.dataset.path, 3600);
+    let qrUrl = '';
+    if (slot.dataset.qrPath) {
+      const { data: qd } = await sb.storage.from('tickets').createSignedUrl(slot.dataset.qrPath, 3600);
+      qrUrl = qd?.signedUrl || '';
+    }
+    // Tapping the thumbnail expands just the cropped QR code when one was
+    // detected on upload; falls back to the full ticket image otherwise.
     slot.outerHTML = data?.signedUrl
-      ? `<img class="attach-thumb" src="${data.signedUrl}" alt="attachment — tap to enlarge" onclick="event.stopPropagation();openImagePreview('${esc(data.signedUrl)}')">`
+      ? `<img class="attach-thumb" src="${data.signedUrl}" alt="attachment — tap to enlarge" onclick="event.stopPropagation();openImagePreview('${esc(qrUrl || data.signedUrl)}')">`
       : '<span class="attach-chip">image unavailable</span>';
   }
 }
@@ -2305,9 +2313,15 @@ function openForm(opts) {
   };
 
   // Attachment state: keptPaths (already in storage), newFiles (to upload),
-  // removedPaths (existing ones the user deleted).
+  // removedPaths (existing ones the user deleted). keptQrPaths/newQrBlobs run
+  // parallel to keptPaths/newFiles (same index = same source image) and hold
+  // the auto-cropped QR-code image for that attachment, or null if none was
+  // detected — see detectAndCropQr().
   let keptPaths = existingImgs.slice();
+  const existingQr = Array.isArray(values.qr_paths) ? values.qr_paths : [];
+  let keptQrPaths = keptPaths.map((_, i) => existingQr[i] || null);
   let newFiles = [];
+  let newQrBlobs = [];
   let removedPaths = [];
 
   function renderGallery() {
@@ -2319,10 +2333,12 @@ function openForm(opts) {
       keptPaths.map((p, i) => `<span class="attach-chip" data-kept="${i}">saved image ${i + 1}<button type="button" class="x">×</button></span>`).join('') +
       newFiles.map((f, i) => `<span class="attach-chip" data-new="${i}">${esc(f.name.slice(0, 24))}<button type="button" class="x">×</button></span>`).join('');
     g.querySelectorAll('[data-kept] .x').forEach((b, i) => b.onclick = () => {
-      removedPaths.push(keptPaths[i]); keptPaths.splice(i, 1); renderGallery();
+      removedPaths.push(keptPaths[i]);
+      if (keptQrPaths[i]) removedPaths.push(keptQrPaths[i]);
+      keptPaths.splice(i, 1); keptQrPaths.splice(i, 1); renderGallery();
     });
     g.querySelectorAll('[data-new] .x').forEach((b, i) => b.onclick = () => {
-      newFiles.splice(i, 1); renderGallery();
+      newFiles.splice(i, 1); newQrBlobs.splice(i, 1); renderGallery();
     });
   }
 
@@ -2353,11 +2369,17 @@ function openForm(opts) {
     $('attach-input').onchange = async () => {
       const picked = [...$('attach-input').files];
       if (!picked.length) return;
+      const startIdx = newFiles.length;
       newFiles.push(...picked);
+      newQrBlobs.push(...picked.map(() => null));
       $('attach-input').value = '';
       renderGallery();
       // (re)parse using every newly-added image together
       await runParse();
+      // best-effort, non-blocking: crop out each image's QR code if it has one
+      picked.forEach((f, i) => {
+        detectAndCropQr(f).then(blob => { newQrBlobs[startIdx + i] = blob; });
+      });
     };
   }
 
@@ -2417,18 +2439,30 @@ function openForm(opts) {
           folder = `user/${user.id}`;
         }
         const uploaded = [];
+        const uploadedQr = [];
         if (keep) {
-          for (const f of newFiles) {
-            const path = `${folder}/${rowId}/${Date.now()}_${Math.random().toString(36).slice(2, 7)}_${f.name.replace(/[^\w.-]/g, '_')}`;
+          for (let i = 0; i < newFiles.length; i++) {
+            const f = newFiles[i];
+            const stamp = `${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+            const path = `${folder}/${rowId}/${stamp}_${f.name.replace(/[^\w.-]/g, '_')}`;
             const up = await sb.storage.from('tickets').upload(path, f, { upsert: true });
-            if (!up.error) uploaded.push(path);
+            uploaded.push(up.error ? null : path);
+            let qrPath = null;
+            if (!up.error && newQrBlobs[i]) {
+              qrPath = `${folder}/${rowId}/${stamp}_qr.jpg`;
+              const upq = await sb.storage.from('tickets').upload(qrPath, newQrBlobs[i], { upsert: true, contentType: 'image/jpeg' });
+              if (upq.error) qrPath = null;
+            }
+            uploadedQr.push(qrPath);
           }
         }
-        // remove: rows the user deleted, plus — if 'keep' is off — every kept path
-        const toRemove = keep ? removedPaths : [...removedPaths, ...keptPaths];
+        // remove: rows the user deleted, plus — if 'keep' is off — every kept path (image + its qr crop)
+        const toRemove = keep ? removedPaths : [...removedPaths, ...keptPaths, ...keptQrPaths.filter(Boolean)];
         if (toRemove.length) await sb.storage.from('tickets').remove(toRemove);
-        const finalPaths = keep ? [...keptPaths, ...uploaded] : [];
-        await sb.from(attach.table).update({ attachment_paths: finalPaths }).eq('id', rowId);
+        const okIdx = uploaded.map((p, i) => p ? i : -1).filter(i => i >= 0);
+        const finalPaths = keep ? [...keptPaths, ...okIdx.map(i => uploaded[i])] : [];
+        const finalQrPaths = keep ? [...keptQrPaths, ...okIdx.map(i => uploadedQr[i])] : [];
+        await sb.from(attach.table).update({ attachment_paths: finalPaths, qr_paths: finalQrPaths }).eq('id', rowId);
       }
       closeModal();
       if (opts.after) await opts.after();
@@ -2469,6 +2503,53 @@ function shrinkImage(file, max = 2200, quality = 0.9) {
       r.onload = () => resolve({ data: String(r.result).split(',')[1], mime: file.type || 'image/jpeg' });
       r.readAsDataURL(file);
     };
+    img.src = URL.createObjectURL(file);
+  });
+}
+
+// Ask Gemini where the scannable QR code / barcode sits in a ticket image,
+// then crop it out of the (full-quality) original file — so the attachment
+// preview can show just the code, big enough to scan, instead of the whole
+// screenshot. Returns a JPEG Blob, or null if none was found / detection failed.
+async function detectAndCropQr(file) {
+  try {
+    const shrunk = await shrinkImage(file, 1200, 0.85);
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), 20000);
+    let res;
+    try {
+      res = await fetch('/api/detect-qr', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ image: shrunk.data, mime: shrunk.mime }),
+        signal: ctrl.signal,
+      });
+    } finally { clearTimeout(t); }
+    const j = await res.json().catch(() => ({}));
+    if (!res.ok || !j.box) return null;
+    return await cropToBox(file, j.box);
+  } catch { return null; }
+}
+// box: {ymin,xmin,ymax,xmax} normalized 0-1000 (Gemini's spatial format).
+// Crops with a small margin so the code's quiet zone survives the crop.
+function cropToBox(file, box) {
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => {
+      const w = img.naturalWidth, h = img.naturalHeight;
+      const bx = box.xmin / 1000 * w, by = box.ymin / 1000 * h;
+      const bw = (box.xmax - box.xmin) / 1000 * w, bh = (box.ymax - box.ymin) / 1000 * h;
+      if (bw <= 0 || bh <= 0) { resolve(null); return; }
+      const pad = Math.max(bw, bh) * 0.12;
+      const sx = Math.max(0, bx - pad), sy = Math.max(0, by - pad);
+      const sw = Math.min(w, bx + bw + pad) - sx, sh = Math.min(h, by + bh + pad) - sy;
+      if (sw <= 0 || sh <= 0) { resolve(null); return; }
+      const c = document.createElement('canvas');
+      c.width = Math.round(sw); c.height = Math.round(sh);
+      c.getContext('2d').drawImage(img, sx, sy, sw, sh, 0, 0, c.width, c.height);
+      c.toBlob((blob) => resolve(blob), 'image/jpeg', 0.92);
+    };
+    img.onerror = () => resolve(null);
     img.src = URL.createObjectURL(file);
   });
 }

@@ -109,6 +109,15 @@ update stays       set attachment_paths = array[attachment_path] where attachmen
 update transport   set attachment_paths = array[attachment_path] where attachment_path is not null and coalesce(array_length(attachment_paths,1),0) = 0;
 update travel_docs set attachment_paths = array[attachment_path] where attachment_path is not null and coalesce(array_length(attachment_paths,1),0) = 0;
 
+-- qr_paths runs parallel to attachment_paths (same index = same source
+-- image): each entry is either the object path of a cropped QR-code/barcode
+-- image auto-detected at upload time, or null if none was found in that
+-- attachment. Lets the attachment preview show just the scannable code,
+-- full-size, instead of the whole ticket screenshot.
+alter table stays       add column if not exists qr_paths text[] default '{}';
+alter table transport   add column if not exists qr_paths text[] default '{}';
+alter table travel_docs add column if not exists qr_paths text[] default '{}';
+
 -- Trip membership — future-proofs multi-user. The trip owner is always a
 -- member (see trigger below). `scope` is null for full-trip access, or a
 -- json array of section keys later (e.g. ["stays","transport"]).
