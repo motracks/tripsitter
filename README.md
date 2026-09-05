@@ -28,7 +28,10 @@ users manually via Authentication → Users → Add user (Auto Confirm).
     See `PRIVACY.md`.
   - `GEONAMES_USERNAME` — a free geonames.org username with "Free Web
     Services" enabled on the account page. Enables destination autocomplete
-    via `/api/geo-search`. Without it, destinations are free-text tags.
+    via `/api/geo-search`, and location timezone lookup via `/api/timezone`
+    (so departure/arrival times display in the location's own time, not the
+    viewer's). Without it, destinations are free-text tags and times fall
+    back to the viewer's device timezone.
 
 The Supabase URL and anon key are hardcoded in `index.html` — the anon key is
 public by design; Row-Level Security is the actual protection.
@@ -40,6 +43,8 @@ public by design; Row-Level Security is the actual protection.
 | `index.html` | The whole app — login, trips overview, tabbed trip view, CRUD |
 | `api/parse-ticket.js` | Vercel function: Gemini vision → structured travel fields |
 | `api/geocode.js` | Vercel function: Nominatim geocoding proxy (no key), for the maps |
+| `api/timezone.js` | Vercel function: GeoNames timezone lookup, so transport times display in the location's own zone |
+| `api/detect-qr.js` | Vercel function: Gemini finds the QR/barcode region in a ticket photo so it can be cropped out for scanning |
 | `api/research-visa-options.js` | Manual research helper for `VISA_OPTIONS` in `index.html` — fetches a short hand-picked list of official visa pages and asks Gemini to draft duration/fee tiers for a human to verify and paste in. Not linked from the UI; hit `/api/research-visa-options` yourself (optionally `?cc=NP,TH`) every so often. Requires `GEMINI_API_KEY`. |
 | `data/airports.json` | IATA → coords, bundled (OurAirports). `scripts/update-airports.sh` |
 | `data/world-110m.json` | Country outlines for globe + mini-maps. `scripts/update-world-outline.sh` |

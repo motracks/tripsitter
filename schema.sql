@@ -68,6 +68,11 @@ alter table transport add column if not exists origin_lng double precision;
 alter table transport add column if not exists dest_lat double precision;
 alter table transport add column if not exists dest_lng double precision;
 alter table transport add column if not exists geo_source text;  -- 'iata' | 'station' | 'city' | 'manual' | 'partial' | null
+-- IANA timezone of each end (e.g. "Europe/Berlin"), resolved from its coords.
+-- departure is always shown/interpreted in origin_tz, arrival in dest_tz —
+-- never the viewer's own device timezone.
+alter table transport add column if not exists origin_tz text;
+alter table transport add column if not exists dest_tz text;
 -- Train-only detail: service number and departure track/platform.
 alter table transport add column if not exists train_number text;
 alter table transport add column if not exists track_info text;

@@ -480,12 +480,68 @@ function fmtDateY(d) {
   const dt = new Date(d + (d.length === 10 ? 'T00:00:00' : ''));
   return `${dt.getDate()} ${MONTHS[dt.getMonth()]} ${dt.getFullYear()}`;
 }
-function fmtDT(ts) {
+// Departure/arrival times are always shown in the LOCATION's own timezone
+// (origin for departure, destination for arrival) when it's known — never
+// the viewer's own device timezone, which was the source of a fixed-offset
+// display bug for anyone viewing from a different zone than the one they
+// booked in. `tz` is an IANA zone id (e.g. "Europe/Berlin"); falls back to
+// the browser's local timezone when it isn't known (legacy rows, or a
+// location the timezone lookup couldn't resolve).
+function fmtDT(ts, tz) {
   if (!ts) return '';
+  if (tz) {
+    try {
+      const parts = new Intl.DateTimeFormat('en-GB', {
+        timeZone: tz, day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
+      }).formatToParts(new Date(ts)).reduce((a, p) => (a[p.type] = p.value, a), {});
+      return `${parts.day} ${parts.month} ${parts.hour}:${parts.minute}`;
+    } catch { /* unknown/invalid zone id — fall through to browser-local */ }
+  }
   const dt = new Date(ts);
   const hh = String(dt.getHours()).padStart(2, '0');
   const mm = String(dt.getMinutes()).padStart(2, '0');
   return `${dt.getDate()} ${MONTHS[dt.getMonth()]} ${hh}:${mm}`;
+}
+// Offset (minutes, UTC ahead of local) that `timeZone` observes at a given
+// UTC instant — used to convert between a location's wall-clock time and UTC.
+function tzOffsetMinutesAt(utcMillis, timeZone) {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone, hourCycle: 'h23',
+    year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', second: '2-digit',
+  }).formatToParts(new Date(utcMillis)).reduce((a, p) => (a[p.type] = p.value, a), {});
+  const asUTC = Date.UTC(+parts.year, +parts.month - 1, +parts.day, +parts.hour, +parts.minute, +parts.second);
+  return (asUTC - utcMillis) / 60000;
+}
+// A "YYYY-MM-DDTHH:mm" wall-clock string, meant as local time IN `timeZone`
+// (e.g. the time printed on a ticket) → the equivalent UTC ISO string.
+// Two-pass so a DST transition on the day in question doesn't throw it off.
+function zonedLocalToUtcISOString(localStr, timeZone) {
+  const [datePart, timePart] = localStr.split('T');
+  const [y, mo, d] = datePart.split('-').map(Number);
+  const [h, mi] = (timePart || '00:00').split(':').map(Number);
+  const guessUTC = Date.UTC(y, mo - 1, d, h, mi);
+  let offset = tzOffsetMinutesAt(guessUTC, timeZone);
+  let utcMillis = guessUTC - offset * 60000;
+  offset = tzOffsetMinutesAt(utcMillis, timeZone);
+  utcMillis = guessUTC - offset * 60000;
+  return new Date(utcMillis).toISOString();
+}
+// A stored UTC instant → the "YYYY-MM-DDTHH:mm" wall-clock string it reads
+// as in `timeZone` — for re-populating a datetime-local input correctly.
+function wallClockInZone(utcISOString, timeZone) {
+  const parts = new Intl.DateTimeFormat('en-GB', {
+    timeZone, year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
+  }).formatToParts(new Date(utcISOString)).reduce((a, p) => (a[p.type] = p.value, a), {});
+  return `${parts.year}-${parts.month}-${parts.day}T${parts.hour}:${parts.minute}`;
+}
+// Same, but in the browser's own timezone — the fallback when a row has no
+// resolved location timezone yet.
+function wallClockLocal(utcISOString) {
+  const dt = new Date(utcISOString);
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${dt.getFullYear()}-${pad(dt.getMonth() + 1)}-${pad(dt.getDate())}T${pad(dt.getHours())}:${pad(dt.getMinutes())}`;
 }
 function nights(a, b) {
   if (!a || !b) return null;
@@ -688,6 +744,24 @@ function loadAirports() {
   return airportsPromise;
 }
 const geoCache = new Map();
+const tzCache = new Map();
+// Look up the IANA timezone for a coordinate (used to interpret/display
+// departure & arrival times in the *location's* time, not the viewer's).
+async function resolveTzForCoords(lat, lng) {
+  if (lat == null || lng == null) return null;
+  const key = Number(lat).toFixed(2) + ',' + Number(lng).toFixed(2);
+  if (tzCache.has(key)) return tzCache.get(key);
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), 5000);
+  let tz = null;
+  try {
+    const res = await fetch(`/api/timezone?lat=${lat}&lng=${lng}`, { signal: ctrl.signal });
+    if (res.ok) { const j = await res.json(); tz = j.tz || null; }
+  } catch { /* leave null */ }
+  finally { clearTimeout(t); }
+  tzCache.set(key, tz);
+  return tz;
+}
 
 function extractIATA(text) {
   if (!text) return null;
@@ -724,30 +798,34 @@ async function geocode(q, country) {
 }
 
 // Resolve one transport endpoint. mode: 'flight' | 'bus' | 'train' | 'car' | 'ferry' | ...
+// Also resolves the location's IANA timezone (from the same coordinate),
+// so callers can interpret/display that endpoint's time correctly.
 async function geoForTransportEnd(text, mode) {
   if (!text) return null;
+  let hit = null, source = null;
   if (mode === 'flight') {
     const iata = extractIATA(text);
     if (iata) {
       const table = await loadAirports();
       const a = table[iata];
-      if (a) return { lat: a.lat, lng: a.lng, source: 'iata' };
+      if (a) { hit = { lat: a.lat, lng: a.lng }; source = 'iata'; }
     }
   }
-  const stationy = mode === 'bus' || mode === 'train' || mode === 'ferry';
-  if (stationy) {
-    const hit = await geocode(text + ' station');
-    if (hit) return { lat: hit.lat, lng: hit.lng, source: 'station' };
-  } else {
-    const hit = await geocode(text);
-    if (hit) return { lat: hit.lat, lng: hit.lng, source: 'city' };
+  if (!hit) {
+    const stationy = mode === 'bus' || mode === 'train' || mode === 'ferry';
+    const g = await geocode(stationy ? text + ' station' : text);
+    if (g) { hit = { lat: g.lat, lng: g.lng }; source = stationy ? 'station' : 'city'; }
   }
-  const city = cityOnly(text);
-  if (city && city !== text) {
-    const hit = await geocode(city);
-    if (hit) return { lat: hit.lat, lng: hit.lng, source: 'city' };
+  if (!hit) {
+    const city = cityOnly(text);
+    if (city && city !== text) {
+      const g = await geocode(city);
+      if (g) { hit = { lat: g.lat, lng: g.lng }; source = 'city'; }
+    }
   }
-  return null;
+  if (!hit) return null;
+  const tz = await resolveTzForCoords(hit.lat, hit.lng);
+  return { lat: hit.lat, lng: hit.lng, source, tz };
 }
 
 // Match a trip place tag to a stay's city, preferring one that carries coords.
@@ -926,8 +1004,8 @@ async function backfillTripGeo() {
         jobs.push(() => resolveStayGeoAwait(s));
     }
     for (const t of currentTransport) {
-      const needsO = t.origin_lat == null && t.origin;
-      const needsD = t.dest_lat == null && t.destination;
+      const needsO = (t.origin_lat == null || t.origin_tz == null) && t.origin;
+      const needsD = (t.dest_lat == null || t.dest_tz == null) && t.destination;
       if ((needsO || needsD) && t.geo_source !== 'manual')
         jobs.push(() => resolveTransportGeoAwait(t));
     }
@@ -959,8 +1037,8 @@ async function resolveTransportGeoAwait(row) {
     geoForTransportEnd(row.destination, mode),
   ]);
   const patch = {};
-  if (o) { patch.origin_lat = o.lat; patch.origin_lng = o.lng; }
-  if (d) { patch.dest_lat = d.lat; patch.dest_lng = d.lng; }
+  if (o) { patch.origin_lat = o.lat; patch.origin_lng = o.lng; if (o.tz) patch.origin_tz = o.tz; }
+  if (d) { patch.dest_lat = d.lat; patch.dest_lng = d.lng; if (d.tz) patch.dest_tz = d.tz; }
   if (!Object.keys(patch).length) return;
   patch.geo_source = (o && d) ? (o.source === 'iata' || d.source === 'iata' ? 'iata' : o.source) : 'partial';
   Object.assign(row, patch);
@@ -1807,7 +1885,7 @@ function renderTimeline(stays, transport) {
         t.carrier && `<div class="detail-row"><span class="detail-label">Carrier</span><span class="detail-value">${esc(t.carrier)}</span></div>`,
         type === 'train' && t.train_number && `<div class="detail-row"><span class="detail-label">Train</span><span class="detail-value">${esc(t.train_number)}</span></div>`,
         type === 'train' && t.track_info && `<div class="detail-row"><span class="detail-label">Track</span><span class="detail-value">${esc(t.track_info)}</span></div>`,
-        t.arrival && `<div class="detail-row"><span class="detail-label">Arrives</span><span class="detail-value">${esc(fmtDT(t.arrival))}</span></div>`,
+        t.arrival && `<div class="detail-row"><span class="detail-label">Arrives</span><span class="detail-value">${esc(fmtDT(t.arrival, t.dest_tz))}</span></div>`,
         t.price != null && `<div class="detail-row"><span class="detail-label">Price</span><span class="detail-value">${Number(t.price) === 0 ? 'free' : fmtMoney(t.price, t.currency)}</span></div>`,
         t.notes && `<div class="detail-row"><span class="detail-label">Notes</span><span class="detail-value">${esc(t.notes)}</span></div>`,
         attachmentRow(t),
@@ -1818,7 +1896,7 @@ function renderTimeline(stays, transport) {
           <div class="tl-card" onclick="toggleCard(this)">
             <div class="tl-card-header">
               <span class="tl-type-pill ${pillClass(type)}">${esc(t.type || 'travel')}</span>
-              <span class="tl-date">${esc(fmtDT(t.departure))}</span>
+              <span class="tl-date">${esc(fmtDT(t.departure, t.origin_tz))}</span>
             </div>
             <div class="tl-title">${esc(t.origin || '')} → ${esc(t.destination || '')}</div>
             <div class="tl-sub">${esc(t.carrier || '')}</div>
@@ -1895,15 +1973,15 @@ function renderTransport(transport) {
       t.carrier && `<div class="detail-row"><span class="detail-label">Carrier</span><span class="detail-value">${esc(t.carrier)}</span></div>`,
       (t.type || '').toLowerCase() === 'train' && t.train_number && `<div class="detail-row"><span class="detail-label">Train</span><span class="detail-value">${esc(t.train_number)}</span></div>`,
       (t.type || '').toLowerCase() === 'train' && t.track_info && `<div class="detail-row"><span class="detail-label">Track</span><span class="detail-value">${esc(t.track_info)}</span></div>`,
-      `<div class="detail-row"><span class="detail-label">Departs</span><span class="detail-value">${esc(fmtDT(t.departure))}</span></div>`,
-      t.arrival && `<div class="detail-row"><span class="detail-label">Arrives</span><span class="detail-value">${esc(fmtDT(t.arrival))}</span></div>`,
+      `<div class="detail-row"><span class="detail-label">Departs</span><span class="detail-value">${esc(fmtDT(t.departure, t.origin_tz))}</span></div>`,
+      t.arrival && `<div class="detail-row"><span class="detail-label">Arrives</span><span class="detail-value">${esc(fmtDT(t.arrival, t.dest_tz))}</span></div>`,
       t.price != null && `<div class="detail-row"><span class="detail-label">Price</span><span class="detail-value" style="display:flex;align-items:center;gap:8px">${Number(t.price) === 0 ? 'free' : money(Number(t.price))} ${currencyPicker(t.currency || 'EUR', 'setTransportCurrency', t.id)}</span></div>`,
       t.notes && `<div class="detail-row"><span class="detail-label">Notes</span><span class="detail-value">${esc(t.notes)}</span></div>`,
       attachmentRow(t),
     ].filter(Boolean).join('');
     return `<div class="info-card" onclick="toggleCard(this)">
       <div class="ic-header">
-        <div><div class="ic-city">${esc(t.origin || '')} → ${esc(t.destination || '')}</div><div class="ic-dates">${esc(fmtDT(t.departure))}${t.carrier ? ' · ' + esc(t.carrier) : ''}</div></div>
+        <div><div class="ic-city">${esc(t.origin || '')} → ${esc(t.destination || '')}</div><div class="ic-dates">${esc(fmtDT(t.departure, t.origin_tz))}${t.carrier ? ' · ' + esc(t.carrier) : ''}</div></div>
         <span class="ic-tag">${icon((t.type || '').toLowerCase())}</span>
       </div>
       <div class="ic-details">${rows}
@@ -2074,15 +2152,19 @@ async function renderVisa(docs, trip) {
 // ---------- CRUD: modal form engine ----------
 // A field spec: { key, label, type, options?, required?, half? }
 // types: text | number | date | datetime | textarea | select | currency
-function fieldHTML(f, val) {
-  let html = fieldInner(f, val);
+// A 'datetime' field showing a location's time (only 'departure'/'arrival'
+// today) reads its IANA zone off the row via this map, so it can be
+// re-populated in that location's wall-clock time rather than the browser's.
+const ZONE_FIELD_MAP = { departure: 'origin_tz', arrival: 'dest_tz' };
+function fieldHTML(f, val, values) {
+  let html = fieldInner(f, val, values);
   if (f.showIf) {
     // tag the outer .field so applyConditionalFields can show/hide it
     html = html.replace('<div class="field"', `<div class="field" data-showif="${esc(f.showIf.field)}:${esc(f.showIf.in.join('|'))}"`);
   }
   return html;
 }
-function fieldInner(f, val) {
+function fieldInner(f, val, values) {
   const v = val == null ? '' : val;
   if (f.type === 'places') {
     const tags = Array.isArray(val) ? val : [];
@@ -2116,7 +2198,10 @@ function fieldInner(f, val) {
   }
   const inputType = f.type === 'datetime' ? 'datetime-local' : (f.type === 'date' ? 'date' : (f.type === 'number' ? 'number' : 'text'));
   let iv = v;
-  if (f.type === 'datetime' && v) iv = new Date(v).toISOString().slice(0, 16);
+  if (f.type === 'datetime' && v) {
+    const tz = values && values[ZONE_FIELD_MAP[f.key]];
+    iv = tz ? wallClockInZone(v, tz) : wallClockLocal(v);
+  }
   if (f.type === 'date' && v) iv = String(v).slice(0, 10);
   const hintEl = f.airportHint ? `<div class="airport-hint" data-hint-for="${f.key}" style="font-size:10px;font-family:'DM Mono',monospace;color:var(--faint);margin-top:4px"></div>` : '';
   return `<div class="field"><label>${esc(f.label)}</label><input type="${inputType}"${f.type === 'number' ? ' step="0.01"' : ''} data-key="${f.key}" value="${esc(iv)}">${hintEl}</div>`;
@@ -2213,8 +2298,8 @@ function openForm(opts) {
   }
   const body = grouped.map(g =>
     g.length === 2
-      ? `<div class="field-2">${fieldHTML(g[0], values[g[0].key])}${fieldHTML(g[1], values[g[1].key])}</div>`
-      : fieldHTML(g[0], values[g[0].key])
+      ? `<div class="field-2">${fieldHTML(g[0], values[g[0].key], values)}${fieldHTML(g[1], values[g[1].key], values)}</div>`
+      : fieldHTML(g[0], values[g[0].key], values)
   ).join('');
 
   const existingImgs = Array.isArray(values.attachment_paths) ? values.attachment_paths
@@ -2293,7 +2378,34 @@ function openForm(opts) {
     updateHints();
   }
 
-  const readForm = () => {
+  // key ('departure'/'arrival') → the text field whose location's timezone
+  // that time is meant to be read in.
+  const ZONE_SOURCE_FIELD_MAP = { departure: 'origin', arrival: 'destination' };
+  // Resolve the origin/destination timezone for each datetime field so its
+  // value can be converted from "wall-clock time at that location" to UTC
+  // correctly, instead of assuming the viewer's own device timezone. Reuses
+  // the row's already-known tz when the location text hasn't changed since
+  // the form opened, so routine edits (price, notes, …) don't re-geocode.
+  const resolveDatetimeZones = async () => {
+    const tzByKey = {};
+    const dtEls = $('modal').querySelectorAll('input[type="datetime-local"][data-key]');
+    if (!dtEls.length) return tzByKey;
+    const mode = ($('modal').querySelector('[data-key="type"]')?.value || '').toLowerCase();
+    for (const el of dtEls) {
+      const key = el.dataset.key;
+      const srcKey = ZONE_SOURCE_FIELD_MAP[key];
+      const zoneCol = ZONE_FIELD_MAP[key];
+      if (!srcKey || !el.value) continue;
+      const srcEl = $('modal').querySelector(`[data-key="${srcKey}"]`);
+      const text = srcEl && srcEl.value;
+      if (!text) continue;
+      if (values[srcKey] === text && values[zoneCol]) { tzByKey[key] = values[zoneCol]; continue; }
+      try { const g = await geoForTransportEnd(text, mode); tzByKey[key] = g?.tz || null; } catch { tzByKey[key] = null; }
+    }
+    return tzByKey;
+  };
+
+  const readForm = (tzByKey = {}) => {
     const data = {};
     $('modal').querySelectorAll('[data-key]').forEach(el => {
       if (el.classList.contains('tag-input')) {
@@ -2306,9 +2418,15 @@ function openForm(opts) {
       let v = el.type === 'checkbox' ? el.checked : el.value;
       if (v === '') v = null;
       if (el.tagName === 'INPUT' && el.type === 'number' && v != null) v = Number(v);
-      if (el.tagName === 'INPUT' && el.type === 'datetime-local' && v) v = new Date(v).toISOString();
+      if (el.tagName === 'INPUT' && el.type === 'datetime-local' && v) {
+        const tz = tzByKey[el.dataset.key];
+        v = tz ? zonedLocalToUtcISOString(v, tz) : new Date(v).toISOString();
+      }
       data[el.dataset.key] = v;
     });
+    for (const [key, col] of Object.entries(ZONE_FIELD_MAP)) {
+      if (tzByKey[key] !== undefined) data[col] = tzByKey[key];
+    }
     return data;
   };
 
@@ -2424,7 +2542,8 @@ function openForm(opts) {
     $('modal-save').disabled = true;
     $('modal-msg').textContent = '';
     try {
-      const data = readForm();
+      const tzByKey = await resolveDatetimeZones();
+      const data = readForm(tzByKey);
       const keep = attach ? !!$('attach-keep')?.checked : false;
       if (attach) {
         data.attachment_paths = keep ? keptPaths.slice() : [];
