@@ -158,19 +158,34 @@ export default async function handler(req, res) {
       generationConfig: { temperature: 0, responseMimeType: 'application/json', maxOutputTokens: 2048 },
     };
 
+    const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
     let lastErr = null;
+    // One retry total across the whole model list, not per model — with no
+    // vercel.json maxDuration override this function has ~10s to work with,
+    // and 3 models is already close to that; retrying every one of them
+    // could push a slow request over the edge. Spend the one retry on
+    // whichever call first hits a transient overload/rate-limit.
+    let retriedOnce = false;
     for (const model of MODELS) {
       const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
-      const gres = await fetch(url, {
+      const call = () => fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'X-goog-api-key': key },
         body: JSON.stringify(payload),
       });
+      let gres = await call();
       if (!gres.ok) {
         lastErr = { status: gres.status, body: (await gres.text()).slice(0, 300) };
         console.error('parse-ticket: gemini', model, gres.status, lastErr.body);
-        continue;
+        if (!retriedOnce && (gres.status === 503 || gres.status === 429)) {
+          retriedOnce = true;
+          await sleep(600);
+          gres = await call();
+          if (!gres.ok) { lastErr = { status: gres.status, body: (await gres.text()).slice(0, 300) }; console.error('parse-ticket: gemini retry', model, gres.status, lastErr.body); }
+        }
       }
+      if (!gres.ok) continue;
       const j = await gres.json();
       const text = (j?.candidates?.[0]?.content?.parts || []).map((p) => p.text || '').join('');
       let parsed = {};

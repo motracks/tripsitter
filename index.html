@@ -2702,6 +2702,11 @@ async function parseTicket(files, kind) {
   } finally { clearTimeout(t); }
   const j = await res.json().catch(() => ({}));
   if (!res.ok) {
+    // A raw {status,body} blob from Gemini isn't useful to a user — for a
+    // transient overload/rate-limit (already retried server-side once per
+    // model before giving up), say so plainly instead.
+    const status = j.detail && typeof j.detail === 'object' ? j.detail.status : null;
+    if (status === 503 || status === 429) throw new Error('Gemini is temporarily overloaded — try again in a moment');
     const d = j.detail ? (typeof j.detail === 'string' ? j.detail : JSON.stringify(j.detail)) : '';
     throw new Error((j.error || 'parse failed') + (d ? ': ' + d.slice(0, 120) : ''));
   }
