@@ -787,46 +787,64 @@ function placeTagForCity(city, placeTags) {
       || null;
 }
 
-// Which place tag a stay actually belongs to, by geography rather than text.
-// Text matching (placeTagForCity) only works when the tag's label is the
-// same city the stay is in — it misses a stay in "Palghar" against a
-// country-level tag labelled "India", even though Palghar plainly is in
-// India. Distance to each tag's own coords (also geocoded, e.g. a country's
-// centroid) is far more reliable once the stay itself has coords: the
-// nearest tag is almost always the right country, since even a country
-// centroid sits far closer to a stay inside it than any other tagged
-// country's point does. Falls back to the text match when either side lacks
-// coordinates yet (not geocoded, or a free-text tag with no lat/lng).
-function nearestPlaceTag(stay, placeTags) {
-  if (stay?.lat == null || stay?.lng == null || !Array.isArray(placeTags)) return placeTagForCity(stay?.city, placeTags);
+// Nearest place tag to a raw {lat,lng} point, by geography — a country's
+// own centroid still sits far closer to a point inside that country than
+// any other tagged country's point does, so this resolves correctly
+// whether the matching tag is city- or country-level.
+function nearestPlaceTagForPoint(lat, lng, placeTags) {
+  if (lat == null || lng == null || !Array.isArray(placeTags)) return null;
   let best = null, bestDist = Infinity;
   for (const p of placeTags) {
     if (p.lat == null || p.lng == null) continue;
-    const dLat = (stay.lat - p.lat) * 111;
-    const dLng = (stay.lng - p.lng) * 111 * Math.cos(stay.lat * Math.PI / 180);
+    const dLat = (lat - p.lat) * 111;
+    const dLng = (lng - p.lng) * 111 * Math.cos(lat * Math.PI / 180);
     const dist = Math.hypot(dLat, dLng);
     if (dist < bestDist) { bestDist = dist; best = p; }
   }
-  return best || placeTagForCity(stay.city, placeTags);
+  return best;
 }
 
-// Nights actually planned in a country so far: sums stays whose nearest
-// place tag (nearestPlaceTag — by geography, so a stay in a tagged
-// country's city still counts even if only the country itself was tagged,
-// not that specific city) carries that country code. A country tagged as a
-// destination but with no stay entered yet returns null ("not planned"),
-// rather than silently assuming the visit lasts the whole trip — which is
-// wrong the moment a trip covers more than one country and false-alarms (or
-// falsely reassures) on every country tagged besides the one actually
-// staying full length.
-function daysInCountry(cc, stays, placeTags) {
-  let total = 0, matched = false;
+// Which place tag a stay actually belongs to. Text matching
+// (placeTagForCity) only works when the tag's label is the same city the
+// stay is in — it misses a stay in "Palghar" against a country-level tag
+// labelled "India", even though Palghar plainly is in India. Falls back to
+// the text match when the stay isn't geocoded yet, or no tag has coords.
+function nearestPlaceTag(stay, placeTags) {
+  if (stay?.lat == null || stay?.lng == null) return placeTagForCity(stay?.city, placeTags);
+  return nearestPlaceTagForPoint(stay.lat, stay.lng, placeTags) || placeTagForCity(stay.city, placeTags);
+}
+
+// Days actually planned in a country so far: the span from the earliest
+// known arrival there to the latest known departure, inclusive — not just
+// the sum of booked-stay nights, which undercounts the moment travel
+// continues past the last recorded stay (a flight out a few days after a
+// course ends is still time spent in that country). Arrival/departure come
+// from stays (start/end date) *and* transport legs whose resolved endpoint
+// lands in or leaves from this country. A country tagged as a destination
+// but with nothing planned there yet returns null ("not planned"), rather
+// than silently assuming the visit lasts the whole trip.
+function daysInCountry(cc, stays, transport, placeTags) {
+  let start = null, end = null, matched = false;
+  const extend = (ts, dir) => {
+    if (!ts) return;
+    const day = String(ts).slice(0, 10);
+    if (dir === 'start' && (!start || day < start)) start = day;
+    if (dir === 'end' && (!end || day > end)) end = day;
+  };
   for (const s of (stays || [])) {
     if (nearestPlaceTag(s, placeTags)?.country !== cc) continue;
-    const n = nights(s.start_date, s.end_date);
-    if (n != null) { total += n; matched = true; }
+    matched = true;
+    extend(s.start_date, 'start');
+    extend(s.end_date || s.start_date, 'end');
   }
-  return matched ? total : null;
+  for (const t of (transport || [])) {
+    const into = nearestPlaceTagForPoint(t.dest_lat, t.dest_lng, placeTags);
+    const from = nearestPlaceTagForPoint(t.origin_lat, t.origin_lng, placeTags);
+    if (into?.country === cc) { matched = true; extend(t.arrival || t.departure, 'start'); }
+    if (from?.country === cc) { matched = true; extend(t.departure, 'end'); }
+  }
+  if (!matched || !start || !end) return null;
+  return Math.round((toDay(end) - toDay(start)) / DAY_MS) + 1;
 }
 
 async function geoForStay(stay, placeTags) {
@@ -1865,7 +1883,7 @@ async function renderVisaHeader(trip) {
 
   // Days actually planned in that specific country so far (not the whole
   // trip's span — a multi-country trip isn't spent entirely in one place).
-  const ccDays = daysInCountry(worst.cc, currentStays, trip?.place_tags);
+  const ccDays = daysInCountry(worst.cc, currentStays, currentTransport, trip?.place_tags);
   let bar = '';
   if (worst.days != null && ccDays != null) {
     const pct = Math.min((ccDays / worst.days) * 100, 100);
@@ -1951,6 +1969,15 @@ function renderTimeline(stays, transport) {
     } else {
       const s = item.data;
       const n = nights(s.start_date, s.end_date);
+      // For a course, the host (the school/retreat you booked) is the
+      // meaningful headline — the city is secondary context, not the other
+      // way round like a plain stay.
+      const isCourse = (s.type || '').toLowerCase() === 'course' && s.host_name;
+      const titleText = isCourse ? s.host_name : (s.city || '');
+      const subText = [
+        n != null ? `${n} night${n === 1 ? '' : 's'}` : null,
+        isCourse ? s.city : s.host_name,
+      ].filter(Boolean).join(' · ');
       const rows = [
         s.host_name && `<div class="detail-row"><span class="detail-label">Host</span><span class="detail-value">${esc(s.host_name)}</span></div>`,
         s.address && `<div class="detail-row"><span class="detail-label">Address</span><span class="detail-value"><a href="https://maps.google.com/?q=${encodeURIComponent(s.address)}" target="_blank">${esc(s.address)} ↗</a></span></div>`,
@@ -1967,8 +1994,8 @@ function renderTimeline(stays, transport) {
               <span class="tl-type-pill pill-stay">${esc(s.type || 'stay')}</span>
               <span class="tl-date">${esc(fmtDate(s.start_date))} – ${esc(fmtDate(s.end_date))}</span>
             </div>
-            <div class="tl-title">${esc(s.city || '')}</div>
-            <div class="tl-sub">${n != null ? n + ' night' + (n === 1 ? '' : 's') : ''}${s.host_name ? ' · ' + esc(s.host_name) : ''}</div>
+            <div class="tl-title">${esc(titleText)}</div>
+            <div class="tl-sub">${esc(subText)}</div>
             <div class="tl-details">${rows || '<div class="detail-row"><span class="detail-label">No extra detail</span><span class="detail-value"></span></div>'}
               <div class="card-actions"><button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();editStay('${s.id}')">edit</button></div>
             </div>
@@ -2061,7 +2088,7 @@ async function renderVisa(docs, trip) {
         // trip's span, which would wrongly assume a multi-country trip is
         // spent entirely in each tagged country (false alarms on the ones
         // you're only passing through, false reassurance on the rest).
-        const ccDays = daysInCountry(cc, currentStays, trip?.place_tags);
+        const ccDays = daysInCountry(cc, currentStays, currentTransport, trip?.place_tags);
         const notPlannedNote = `<div class="vb-line">No stays added for ${esc(COUNTRY_NAME[cc] || cc)} yet — add them here to check the actual length of this visit against the limit.</div>`;
         let bar = '';
         if (v.days != null) {
@@ -2164,7 +2191,7 @@ async function renderVisa(docs, trip) {
   });
   const docsHTML = sortedDocs.length ? sortedDocs.map(d => {
     const docCc = ccs.find(cc => countryMatches(d.country, cc));
-    const days = docCc ? daysInCountry(docCc, currentStays, trip?.place_tags) : null;
+    const days = docCc ? daysInCountry(docCc, currentStays, currentTransport, trip?.place_tags) : null;
     // Passport expiry: many countries require 3–6 months' validity beyond
     // travel, so flag inside that window, not just once actually expired.
     const passportWarn = d.doc_type === 'Passport' && d.expires_on ? (() => {
