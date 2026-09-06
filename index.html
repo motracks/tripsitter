@@ -33,6 +33,23 @@
 
   .wrap { max-width: 560px; margin: 0 auto; }
 
+  /* Full-screen map view */
+  .map-view { position: fixed; inset: 0; z-index: 50; background: var(--bg); display: flex; flex-direction: column; }
+  .map-view header { padding: 1rem 1.25rem; flex-shrink: 0; }
+  .map-canvas-wrap { position: relative; flex: 1; min-height: 0; overflow: hidden; touch-action: none; }
+  .map-canvas-wrap canvas { display: block; width: 100%; height: 100%; cursor: grab; }
+  .map-canvas-wrap canvas:active { cursor: grabbing; }
+  .map-controls { position: absolute; right: 14px; bottom: 14px; display: flex; flex-direction: column; gap: 8px; }
+  .map-controls button { width: 36px; height: 36px; border-radius: 50%; background: var(--surface);
+    border: 0.5px solid var(--border2); color: var(--text); font-size: 18px; line-height: 1; cursor: pointer; }
+  .map-controls button:hover { border-color: var(--green); }
+  .map-legend { position: absolute; left: 14px; bottom: 14px; display: flex; gap: 12px; font-size: 11px;
+    font-family: 'DM Mono', monospace; color: var(--muted); background: var(--surface); border: 0.5px solid var(--border);
+    border-radius: var(--r); padding: 6px 10px; }
+  .map-legend span { display: flex; align-items: center; gap: 5px; }
+  .map-legend i { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+  .map-current-badge { position: absolute; left: 14px; top: 14px; right: 14px; max-width: 320px; }
+
   /* LOGIN */
   #login { max-width: 360px; margin: 18vh auto 0; padding: 0 1.25rem; }
   #login h1 { font-size: 30px; font-weight: 700; letter-spacing: -0.01em; }
@@ -385,6 +402,7 @@
   <div style="padding:0 1.25rem">
     <div class="ov-controls">
       <input type="search" id="trip-search" placeholder="search trips, places, hosts…" autocomplete="off">
+      <button class="btn btn-ghost btn-sm" id="open-map-btn">map</button>
       <button class="btn btn-green btn-sm" id="new-trip-btn">+ New trip</button>
     </div>
     <div class="card-grid" id="trips-list"></div>
@@ -447,6 +465,30 @@
   </div>
 </div>
 
+<!-- FULL MAP VIEW -->
+<div id="map" class="hidden map-view">
+  <header>
+    <div class="header-left">
+      <button class="backbtn" id="map-back-btn">← all trips</button>
+      <h1>Map</h1>
+    </div>
+  </header>
+  <div class="map-canvas-wrap" id="map-canvas-wrap">
+    <canvas id="map-canvas"></canvas>
+    <div class="current-status hidden map-current-badge" id="map-current-status"></div>
+    <div class="map-legend">
+      <span><i style="background:var(--green)"></i>ongoing</span>
+      <span><i style="background:var(--blue)"></i>upcoming</span>
+      <span><i style="background:var(--faint)"></i>past</span>
+    </div>
+    <div class="map-controls">
+      <button id="map-zoom-in" aria-label="Zoom in">+</button>
+      <button id="map-zoom-out" aria-label="Zoom out">−</button>
+      <button id="map-zoom-reset" aria-label="Fit all trips">⤢</button>
+    </div>
+  </div>
+</div>
+
 <div id="modal" class="hidden"></div>
 
 <script type="module">
@@ -461,7 +503,7 @@ const sb = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 const $ = (id) => document.getElementById(id);
 const esc = (s) => (s == null ? '' : String(s).replace(/[&<>"']/g, c => (
   { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])));
-const show = (id) => { ['login', 'onboarding', 'overview', 'detail'].forEach(v => $(v).classList.toggle('hidden', v !== id)); };
+const show = (id) => { ['login', 'onboarding', 'overview', 'detail', 'map'].forEach(v => $(v).classList.toggle('hidden', v !== id)); };
 
 const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 function fmtDate(d) {
@@ -902,6 +944,21 @@ function renderTripMap(canvas, { points = [], legs = [], bbox }) {
 // full origin/destination — so the whole journey fits on the map, not just
 // the stays. `current` (from currentTravelState) flags whichever leg/stay
 // "now" falls inside, so it can be drawn highlighted.
+// Shared by the per-trip mini-map and the full map view: bbox of a point
+// list, padded ~15%, with a minimum span so a single point isn't a pinpoint.
+function bboxFromPoints(pts) {
+  if (!pts.length) return null;
+  let minLat = 90, maxLat = -90, minLng = 180, maxLng = -180;
+  for (const p of pts) {
+    minLat = Math.min(minLat, p.lat); maxLat = Math.max(maxLat, p.lat);
+    minLng = Math.min(minLng, p.lng); maxLng = Math.max(maxLng, p.lng);
+  }
+  const padLat = Math.max((maxLat - minLat) * 0.15, 1.5);
+  const padLng = Math.max((maxLng - minLng) * 0.15, 1.5);
+  return { minLat: minLat - padLat, maxLat: maxLat + padLat,
+    minLng: minLng - padLng, maxLng: maxLng + padLng };
+}
+
 function tripMapData(stays, transport, current) {
   const stayPts = (stays || [])
     .filter(s => s.lat != null && s.lng != null)
@@ -922,18 +979,8 @@ function tripMapData(stays, transport, current) {
     if (l.o) pts.push(l.o);
     if (l.d) pts.push(l.d);
   }
-  if (!pts.length) return null;
-
-  let minLat = 90, maxLat = -90, minLng = 180, maxLng = -180;
-  for (const p of pts) {
-    minLat = Math.min(minLat, p.lat); maxLat = Math.max(maxLat, p.lat);
-    minLng = Math.min(minLng, p.lng); maxLng = Math.max(maxLng, p.lng);
-  }
-  // pad ~15%, and enforce a minimum span so a single-city trip isn't a pinpoint
-  const padLat = Math.max((maxLat - minLat) * 0.15, 1.5);
-  const padLng = Math.max((maxLng - minLng) * 0.15, 1.5);
-  const bbox = { minLat: minLat - padLat, maxLat: maxLat + padLat,
-    minLng: minLng - padLng, maxLng: maxLng + padLng };
+  const bbox = bboxFromPoints(pts);
+  if (!bbox) return null;
   return { points: stayPts, legs, bbox };
 }
 
@@ -1011,6 +1058,248 @@ async function renderTripMapForCurrentTrip() {
   wrap.classList.remove('hidden');
   renderTripMap($('trip-map-canvas'), data);
 }
+
+// ---------- full map view (all trips, pan + zoom) ----------
+let mapAllData = null;      // { points, legs } across every trip
+let mapView = { lat: 0, lng: 0, scale: 1 };
+let mapBaseScale = 1;
+let mapScaleBounds = [1, 1];
+let mapPointers = new Map();
+let mapPinchDist = null;
+let mapDragMoved = 0;
+let mapCurrentTripId = null; // which trip's leg/stay is "active" right now, if any
+
+async function loadAllTripsMapData() {
+  const [{ data: trips }, { data: stays }, { data: transport }] = await Promise.all([
+    sb.from('trips').select('id, name, start_date, end_date, status'),
+    sb.from('stays').select('id, trip_id, city, start_date, end_date, lat, lng'),
+    sb.from('transport').select('id, trip_id, type, origin, destination, departure, arrival, origin_lat, origin_lng, dest_lat, dest_lng'),
+  ]);
+  const tripById = Object.fromEntries((trips || []).map(t => [t.id, t]));
+  const staysByTrip = {}, transportByTrip = {};
+  for (const s of (stays || [])) (staysByTrip[s.trip_id] ??= []).push(s);
+  for (const t of (transport || [])) (transportByTrip[t.trip_id] ??= []).push(t);
+
+  // which single leg/stay (if any) is happening right now, across all trips
+  let activeStayId = null, activeLegId = null;
+  mapCurrentTripId = null;
+  for (const t of (trips || [])) {
+    if (tripStatus(t) !== 'ongoing') continue;
+    const state = currentTravelState(staysByTrip[t.id] || [], transportByTrip[t.id] || []);
+    if (!state) continue;
+    mapCurrentTripId = t.id;
+    if (state.kind === 'stay') activeStayId = state.data.id; else activeLegId = state.data.id;
+    break;
+  }
+
+  const points = (stays || [])
+    .filter(s => s.lat != null && s.lng != null)
+    .map(s => ({
+      lat: s.lat, lng: s.lng, id: s.id, tripId: s.trip_id, label: s.city,
+      status: tripById[s.trip_id] ? tripStatus(tripById[s.trip_id]) : 'done',
+      active: s.id === activeStayId,
+    }));
+  const legs = (transport || [])
+    .filter(t => t.origin_lat != null && t.origin_lng != null && t.dest_lat != null && t.dest_lng != null)
+    .map(t => ({
+      id: t.id, tripId: t.trip_id, mode: (t.type || 'other').toLowerCase(), destination: t.destination,
+      o: { lat: t.origin_lat, lng: t.origin_lng }, d: { lat: t.dest_lat, lng: t.dest_lng },
+      status: tripById[t.trip_id] ? tripStatus(tripById[t.trip_id]) : 'done',
+      active: t.id === activeLegId,
+    }));
+  return { points, legs, tripById };
+}
+
+function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
+
+function fitMapView(bbox) {
+  const canvas = $('map-canvas');
+  const cssW = canvas.clientWidth || 320, cssH = canvas.clientHeight || 480;
+  const lngSpan = Math.max(bbox.maxLng - bbox.minLng, 0.05);
+  const latSpan = Math.max(bbox.maxLat - bbox.minLat, 0.05);
+  mapBaseScale = Math.min(cssW / lngSpan, cssH / latSpan);
+  mapScaleBounds = [mapBaseScale * 0.3, mapBaseScale * 60];
+  mapView = { lat: (bbox.minLat + bbox.maxLat) / 2, lng: (bbox.minLng + bbox.maxLng) / 2, scale: mapBaseScale };
+}
+
+function renderMapCanvas() {
+  const canvas = $('map-canvas');
+  if (!canvas || !worldGeo || !mapAllData) return;
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  const cssW = canvas.clientWidth || 320, cssH = canvas.clientHeight || 480;
+  canvas.width = cssW * dpr; canvas.height = cssH * dpr;
+  const ctx = canvas.getContext('2d');
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, cssW, cssH);
+
+  const styles = getComputedStyle(document.documentElement);
+  const col = (n, f) => (styles.getPropertyValue(n).trim() || f);
+  const landFill = col('--surface2', '#1e2220');
+  const landStroke = col('--border2', 'rgba(255,255,255,0.12)');
+  const statusCol = { ongoing: col('--green', '#4ade9a'), upcoming: col('--blue', '#60aaff'), done: col('--faint', 'rgba(240,237,232,0.18)') };
+
+  const s = mapView.scale;
+  const px = (lng) => cssW / 2 + (lng - mapView.lng) * s;
+  const py = (lat) => cssH / 2 - (lat - mapView.lat) * s;
+
+  ctx.fillStyle = landFill; ctx.strokeStyle = landStroke; ctx.lineWidth = 0.5;
+  const drawRing = (ring) => {
+    ctx.beginPath();
+    ring.forEach(([lng, lat], i) => { const x = px(lng), y = py(lat); i ? ctx.lineTo(x, y) : ctx.moveTo(x, y); });
+    ctx.closePath(); ctx.fill(); ctx.stroke();
+  };
+  for (const f of worldGeo.features) {
+    const g = f.geometry; if (!g) continue;
+    const polys = g.type === 'Polygon' ? [g.coordinates] : g.type === 'MultiPolygon' ? g.coordinates : [];
+    for (const poly of polys) for (const ring of poly) drawRing(ring);
+  }
+
+  ctx.lineCap = 'round';
+  for (const leg of mapAllData.legs) {
+    const c = statusCol[leg.status] || statusCol.done;
+    ctx.strokeStyle = c;
+    ctx.lineWidth = leg.active ? 3 : (leg.status === 'done' ? 1 : 1.5);
+    if (leg.active) { ctx.save(); ctx.shadowColor = c; ctx.shadowBlur = 8; }
+    ctx.beginPath();
+    ctx.moveTo(px(leg.o.lng), py(leg.o.lat));
+    ctx.lineTo(px(leg.d.lng), py(leg.d.lat));
+    ctx.stroke();
+    if (leg.active) ctx.restore();
+  }
+
+  for (const p of mapAllData.points) {
+    const x = px(p.lng), y = py(p.lat);
+    const c = statusCol[p.status] || statusCol.done;
+    if (p.active) {
+      ctx.save(); ctx.globalAlpha = 0.25;
+      ctx.beginPath(); ctx.arc(x, y, 9, 0, Math.PI * 2); ctx.fillStyle = c; ctx.fill();
+      ctx.restore();
+    }
+    ctx.beginPath(); ctx.arc(x, y, p.active ? 5 : 4, 0, Math.PI * 2);
+    ctx.fillStyle = c; ctx.fill();
+    ctx.strokeStyle = col('--bg', '#0d0f0e'); ctx.lineWidth = 1.5; ctx.stroke();
+  }
+}
+
+// Screen-space nearest-point hit test, used to open a trip on tap/click.
+function mapHitTest(clientX, clientY) {
+  const canvas = $('map-canvas');
+  const rect = canvas.getBoundingClientRect();
+  const mx = clientX - rect.left, my = clientY - rect.top;
+  const px = (lng) => rect.width / 2 + (lng - mapView.lng) * mapView.scale;
+  const py = (lat) => rect.height / 2 - (lat - mapView.lat) * mapView.scale;
+  let best = null, bestDist = 16; // px threshold
+  for (const p of (mapAllData?.points || [])) {
+    const d = Math.hypot(px(p.lng) - mx, py(p.lat) - my);
+    if (d < bestDist) { bestDist = d; best = p.tripId; }
+  }
+  return best;
+}
+
+function zoomMapBy(factor, aroundClientX, aroundClientY) {
+  const canvas = $('map-canvas');
+  const rect = canvas.getBoundingClientRect();
+  const mx = aroundClientX != null ? aroundClientX - rect.left : rect.width / 2;
+  const my = aroundClientY != null ? aroundClientY - rect.top : rect.height / 2;
+  const beforeLng = mapView.lng + (mx - rect.width / 2) / mapView.scale;
+  const beforeLat = mapView.lat - (my - rect.height / 2) / mapView.scale;
+  mapView.scale = clamp(mapView.scale * factor, mapScaleBounds[0], mapScaleBounds[1]);
+  const afterLng = mapView.lng + (mx - rect.width / 2) / mapView.scale;
+  const afterLat = mapView.lat - (my - rect.height / 2) / mapView.scale;
+  mapView.lng += beforeLng - afterLng;
+  mapView.lat += beforeLat - afterLat;
+  renderMapCanvas();
+}
+
+let mapListenersWired = false;
+function wireMapInteraction() {
+  if (mapListenersWired) return;
+  mapListenersWired = true;
+  const canvas = $('map-canvas');
+
+  canvas.addEventListener('wheel', (e) => {
+    e.preventDefault();
+    zoomMapBy(Math.pow(1.0015, -e.deltaY), e.clientX, e.clientY);
+  }, { passive: false });
+
+  canvas.addEventListener('pointerdown', (e) => {
+    canvas.setPointerCapture(e.pointerId);
+    mapPointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    mapDragMoved = 0;
+  });
+  canvas.addEventListener('pointermove', (e) => {
+    if (!mapPointers.has(e.pointerId)) return;
+    const prev = mapPointers.get(e.pointerId);
+    mapPointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (mapPointers.size === 1) {
+      const dx = e.clientX - prev.x, dy = e.clientY - prev.y;
+      mapDragMoved += Math.abs(dx) + Math.abs(dy);
+      mapView.lng -= dx / mapView.scale;
+      mapView.lat += dy / mapView.scale;
+      renderMapCanvas();
+    } else if (mapPointers.size === 2) {
+      const pts = [...mapPointers.values()];
+      const dist = Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y);
+      if (mapPinchDist != null) zoomMapBy(dist / mapPinchDist);
+      mapPinchDist = dist;
+    }
+  });
+  const endPointer = (e) => {
+    const wasTap = mapPointers.size === 1 && mapDragMoved < 6;
+    mapPointers.delete(e.pointerId);
+    if (mapPointers.size < 2) mapPinchDist = null;
+    if (wasTap) {
+      const tripId = mapHitTest(e.clientX, e.clientY);
+      if (tripId) openTrip(tripId);
+    }
+  };
+  canvas.addEventListener('pointerup', endPointer);
+  canvas.addEventListener('pointercancel', endPointer);
+
+  $('map-zoom-in').addEventListener('click', () => zoomMapBy(1.4));
+  $('map-zoom-out').addEventListener('click', () => zoomMapBy(1 / 1.4));
+  $('map-zoom-reset').addEventListener('click', () => { fitMapView(bboxFromPoints(mapAllPoints())); renderMapCanvas(); });
+
+  window.addEventListener('resize', () => { if (!$('map').classList.contains('hidden')) renderMapCanvas(); });
+}
+
+function mapAllPoints() {
+  const pts = [...(mapAllData?.points || [])];
+  for (const l of (mapAllData?.legs || [])) { pts.push(l.o); pts.push(l.d); }
+  return pts;
+}
+
+function renderMapCurrentStatus() {
+  const el = $('map-current-status');
+  const trip = mapCurrentTripId ? mapAllData.tripById[mapCurrentTripId] : null;
+  if (!trip) { el.classList.add('hidden'); el.innerHTML = ''; return; }
+  const leg = mapAllData.legs.find(l => l.active);
+  const stay = mapAllData.points.find(p => p.active);
+  const text = leg ? currentStatusText({ kind: 'transport', data: { type: leg.mode, destination: leg.destination } })
+    : stay ? `Currently in ${stay.label || ''}` : '';
+  el.classList.remove('hidden');
+  el.innerHTML = `<span class="status-dot${leg ? ' pulse' : ''}"></span> ${esc(trip.name || '')}${text ? ' · ' + esc(text) : ''}`;
+}
+
+// Global back-to-overview map, opened from the mini-map (or elsewhere).
+// opts.focusTripId zooms/pans to just that trip's bbox on open.
+window.openMap = async function openMap(opts) {
+  show('map');
+  wireMapInteraction();
+  await loadWorldGeo();
+  mapAllData = await loadAllTripsMapData();
+  renderMapCurrentStatus();
+
+  const focusId = opts?.focusTripId;
+  const pts = focusId
+    ? [...mapAllData.points.filter(p => p.tripId === focusId),
+        ...mapAllData.legs.filter(l => l.tripId === focusId).flatMap(l => [l.o, l.d])]
+    : mapAllPoints();
+  const bbox = bboxFromPoints(pts.length ? pts : mapAllPoints());
+  if (bbox) fitMapView(bbox);
+  renderMapCanvas();
+};
+$('map-back-btn').addEventListener('click', routeToOverview);
 
 // Ensure a stay/transport row has amount_base in the trip's base currency,
 // converted at the rate for the day it was entered. Writes the cache back to
@@ -2697,6 +2986,7 @@ window.editDoc = (id) => docForm(currentDocs.find(x => x.id === id));
 
 // ---------- boot ----------
 $('new-trip-btn').addEventListener('click', newTrip);
+$('open-map-btn').addEventListener('click', () => window.openMap());
 $('edit-trip-btn').addEventListener('click', editTrip);
 $('add-stay-btn').addEventListener('click', () => stayForm());
 $('add-stay-btn-2').addEventListener('click', () => stayForm());
@@ -2704,9 +2994,7 @@ $('add-transport-btn').addEventListener('click', () => transportForm());
 $('add-transport-btn-2').addEventListener('click', () => transportForm());
 $('add-doc-btn').addEventListener('click', () => docForm());
 
-// Mini-map → full Map view (the #map view lands in a later commit; until then
-// this is a no-op placeholder so the tap target is wired end to end).
-window.openMap = window.openMap || function (opts) { /* #map view — later commit */ void opts; };
+// Mini-map → full Map view, pre-zoomed to the open trip.
 const _tripMapEl = $('trip-map');
 const _openTripMap = () => { if (currentTrip) window.openMap({ focusTripId: currentTrip.id }); };
 _tripMapEl.addEventListener('click', _openTripMap);
