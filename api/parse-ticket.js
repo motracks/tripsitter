@@ -34,6 +34,10 @@ Return a JSON object with any of these keys you can determine:
   destination: arrival city / airport / station
   departure: ISO 8601 datetime (local time as printed; date-only is fine)
   arrival: ISO 8601 datetime
+  layover: departure city / airport of a connecting stopover, if the ticket shows
+        one leg changing planes/vehicles en route (e.g. "Abu Dhabi (AUH)"). Omit
+        entirely for a direct/nonstop trip. If there is more than one stopover,
+        give only the first.
   carrier: airline / operator name, plus flight or service number
   booking_code: PNR / booking reference / ticket number
   price: number only (no currency symbol)
