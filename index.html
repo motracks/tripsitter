@@ -476,6 +476,17 @@ function fmtDT(ts) {
   const mm = String(dt.getMinutes()).padStart(2, '0');
   return `${dt.getDate()} ${MONTHS[dt.getMonth()]} ${hh}:${mm}`;
 }
+// A <input type="datetime-local"> shows/reads a plain "YYYY-MM-DDTHH:mm"
+// with no timezone — the browser treats it as local wall-clock time. Use
+// this (not Date#toISOString, which is always UTC) to populate one from a
+// stored UTC timestamp, or its displayed value silently shifts by your UTC
+// offset every time you reopen the form (e.g. 2h off in Central Europe).
+function toLocalDatetimeInputValue(ts) {
+  const dt = new Date(ts);
+  if (Number.isNaN(+dt)) return '';
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${dt.getFullYear()}-${pad(dt.getMonth() + 1)}-${pad(dt.getDate())}T${pad(dt.getHours())}:${pad(dt.getMinutes())}`;
+}
 function nights(a, b) {
   if (!a || !b) return null;
   return Math.round((new Date(b) - new Date(a)) / 86400000);
@@ -2280,7 +2291,7 @@ function fieldInner(f, val) {
   }
   const inputType = f.type === 'datetime' ? 'datetime-local' : (f.type === 'date' ? 'date' : (f.type === 'number' ? 'number' : 'text'));
   let iv = v;
-  if (f.type === 'datetime' && v) iv = new Date(v).toISOString().slice(0, 16);
+  if (f.type === 'datetime' && v) iv = toLocalDatetimeInputValue(v);
   if (f.type === 'date' && v) iv = String(v).slice(0, 10);
   const hintEl = f.airportHint ? `<div class="airport-hint" data-hint-for="${f.key}" style="font-size:10px;font-family:'DM Mono',monospace;color:var(--faint);margin-top:4px"></div>` : '';
   return `<div class="field"><label>${esc(f.label)}</label><input type="${inputType}"${f.type === 'number' ? ' step="0.01"' : ''} data-key="${f.key}" value="${esc(iv)}">${hintEl}</div>`;
@@ -2553,7 +2564,7 @@ function openForm(opts) {
 
       // For every other field: don't clobber something already filled in.
       if (el.value && el.value !== '—') continue;
-      if (el.type === 'datetime-local') el.value = new Date(val).toISOString().slice(0, 16);
+      if (el.type === 'datetime-local') el.value = toLocalDatetimeInputValue(val);
       else if (el.type === 'date') el.value = String(val).slice(0, 10);
       else el.value = val;
       any = true;
