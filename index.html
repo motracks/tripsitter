@@ -787,17 +787,42 @@ function placeTagForCity(city, placeTags) {
       || null;
 }
 
-// Nights actually planned in a country so far: sums stays whose city matches
-// a place tag carrying that country code. A country tagged as a destination
-// but with no stay entered yet returns null ("not planned"), rather than
-// silently assuming the visit lasts the whole trip — which is wrong the
-// moment a trip covers more than one country and false-alarms (or falsely
-// reassures) on every country tagged besides the one actually staying full
-// length.
+// Which place tag a stay actually belongs to, by geography rather than text.
+// Text matching (placeTagForCity) only works when the tag's label is the
+// same city the stay is in — it misses a stay in "Palghar" against a
+// country-level tag labelled "India", even though Palghar plainly is in
+// India. Distance to each tag's own coords (also geocoded, e.g. a country's
+// centroid) is far more reliable once the stay itself has coords: the
+// nearest tag is almost always the right country, since even a country
+// centroid sits far closer to a stay inside it than any other tagged
+// country's point does. Falls back to the text match when either side lacks
+// coordinates yet (not geocoded, or a free-text tag with no lat/lng).
+function nearestPlaceTag(stay, placeTags) {
+  if (stay?.lat == null || stay?.lng == null || !Array.isArray(placeTags)) return placeTagForCity(stay?.city, placeTags);
+  let best = null, bestDist = Infinity;
+  for (const p of placeTags) {
+    if (p.lat == null || p.lng == null) continue;
+    const dLat = (stay.lat - p.lat) * 111;
+    const dLng = (stay.lng - p.lng) * 111 * Math.cos(stay.lat * Math.PI / 180);
+    const dist = Math.hypot(dLat, dLng);
+    if (dist < bestDist) { bestDist = dist; best = p; }
+  }
+  return best || placeTagForCity(stay.city, placeTags);
+}
+
+// Nights actually planned in a country so far: sums stays whose nearest
+// place tag (nearestPlaceTag — by geography, so a stay in a tagged
+// country's city still counts even if only the country itself was tagged,
+// not that specific city) carries that country code. A country tagged as a
+// destination but with no stay entered yet returns null ("not planned"),
+// rather than silently assuming the visit lasts the whole trip — which is
+// wrong the moment a trip covers more than one country and false-alarms (or
+// falsely reassures) on every country tagged besides the one actually
+// staying full length.
 function daysInCountry(cc, stays, placeTags) {
   let total = 0, matched = false;
   for (const s of (stays || [])) {
-    if (placeTagForCity(s.city, placeTags)?.country !== cc) continue;
+    if (nearestPlaceTag(s, placeTags)?.country !== cc) continue;
     const n = nights(s.start_date, s.end_date);
     if (n != null) { total += n; matched = true; }
   }
@@ -1007,6 +1032,11 @@ async function backfillTripGeo() {
     tripGeoBackfilling = false;
   }
   renderTripMapForCurrentTrip();
+  // A stay's just-resolved coords can change which country it's counted
+  // against (see nearestPlaceTag/daysInCountry) — refresh the visa numbers
+  // so they don't stay stuck on "not planned yet" once geocoding catches up.
+  renderVisaHeader(currentTrip);
+  renderVisa(currentDocs, currentTrip);
 }
 
 // await-able variants of the fire-and-forget resolvers (for the backfill pass)
