@@ -43,6 +43,7 @@ public by design; Row-Level Security is the actual protection.
 | `api/research-visa-options.js` | Manual research helper for `VISA_OPTIONS` in `index.html` — fetches a short hand-picked list of official visa pages and asks Gemini to draft duration/fee tiers for a human to verify and paste in. Not linked from the UI; hit `/api/research-visa-options` yourself (optionally `?cc=NP,TH`) every so often. Requires `GEMINI_API_KEY`. |
 | `data/airports.json` | IATA → coords, bundled (OurAirports). `scripts/update-airports.sh` |
 | `data/world-110m.json` | Country outlines for globe + mini-maps. `scripts/update-world-outline.sh` |
+| `vendor/jsQR.js` | Vendored QR-code detector (Apache-2.0) — crops an attachment's preview to just its QR code, lazy-loaded on first use. `scripts/update-jsqr.sh` |
 | `schema.sql` | Full schema, RLS, storage bucket, seed data |
 | `PRIVACY.md` | What's stored, where it goes, how to erase |
 | `HouseTrip_reference.html` | The original single-trip prototype, kept for reference |
