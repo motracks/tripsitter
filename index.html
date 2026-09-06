@@ -89,13 +89,8 @@
   .timeline { position: relative; }
   .trip-map { position: relative; width: 100%; aspect-ratio: 16 / 9; max-height: 220px;
     border: 0.5px solid var(--border2); border-radius: var(--r); overflow: hidden;
-    background: var(--surface); margin-bottom: 1rem; cursor: pointer; }
+    background: var(--surface); margin-bottom: 1rem; }
   .trip-map canvas { display: block; width: 100%; height: 100%; }
-  .trip-map:hover { border-color: var(--green); }
-  .trip-map::after { content: 'open map'; position: absolute; right: 8px; bottom: 6px;
-    font-family: 'DM Mono', monospace; font-size: 9px; text-transform: uppercase;
-    letter-spacing: 0.1em; color: var(--muted); background: var(--bg);
-    padding: 2px 6px; border-radius: 6px; pointer-events: none; }
   .tl-line { position: absolute; left: 19px; top: 8px; bottom: 8px; width: 1px; background: var(--border2); }
   .tl-item { display: flex; gap: 14px; margin-bottom: 10px; animation: fadeUp 0.3s ease both; }
   .tl-dot-wrap { flex-shrink: 0; width: 38px; display: flex; flex-direction: column; align-items: center; padding-top: 14px; }
@@ -115,6 +110,8 @@
   .pill-bus { background: var(--green-dim); color: var(--green); }
   .pill-train { background: var(--amber-dim); color: var(--amber); }
   .pill-stay { background: var(--faint); color: var(--muted); }
+  .ic-tag.ic-tag-icon { display: inline-flex; align-items: center; justify-content: center; width: 26px; height: 22px; padding: 0; }
+  .ic-tag-icon svg { display: block; }
 
   .tl-date { font-size: 11px; font-family: 'DM Mono', monospace; color: var(--muted); }
   .tl-title { font-size: 15px; font-weight: 600; margin-top: 6px; line-height: 1.3; }
@@ -418,7 +415,7 @@
       <button class="btn btn-green btn-sm" id="add-stay-btn">+ stay</button>
     </div>
     <div class="current-status hidden" id="trip-current-status"></div>
-    <div class="trip-map hidden" id="trip-map" role="button" tabindex="0" aria-label="Open the map for this trip">
+    <div class="trip-map hidden" id="trip-map">
       <canvas id="trip-map-canvas"></canvas>
     </div>
     <p class="section-label">Full timeline</p>
@@ -480,6 +477,17 @@ function fmtDT(ts) {
   const hh = String(dt.getHours()).padStart(2, '0');
   const mm = String(dt.getMinutes()).padStart(2, '0');
   return `${dt.getDate()} ${MONTHS[dt.getMonth()]} ${hh}:${mm}`;
+}
+// A <input type="datetime-local"> shows/reads a plain "YYYY-MM-DDTHH:mm"
+// with no timezone — the browser treats it as local wall-clock time. Use
+// this (not Date#toISOString, which is always UTC) to populate one from a
+// stored UTC timestamp, or its displayed value silently shifts by your UTC
+// offset every time you reopen the form (e.g. 2h off in Central Europe).
+function toLocalDatetimeInputValue(ts) {
+  const dt = new Date(ts);
+  if (Number.isNaN(+dt)) return '';
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${dt.getFullYear()}-${pad(dt.getMonth() + 1)}-${pad(dt.getDate())}T${pad(dt.getHours())}:${pad(dt.getMinutes())}`;
 }
 function nights(a, b) {
   if (!a || !b) return null;
@@ -725,6 +733,16 @@ function cityOnly(text) {
   return String(text || '').replace(/\s*\([^)]*\)\s*/g, ' ').replace(/\s+/g, ' ').trim();
 }
 
+// Normalizes a flight endpoint to "City (CODE)" however it was originally
+// typed in — "BOM Mumbai T2", "Mumbai", "ZRH" all become "Mumbai (BOM)" /
+// "Zurich (ZRH)" once the airport table (loadAirports()) is loaded. Falls
+// back to the raw text when no IATA code can be resolved.
+function formatFlightPlace(text) {
+  const iata = extractIATA(text);
+  const a = iata && AIRPORTS ? AIRPORTS[iata] : null;
+  return a ? `${a.city || a.name} (${iata})` : (text || '');
+}
+
 async function geocode(q, country) {
   q = String(q || '').trim();
   if (q.length < 2) return null;
@@ -782,6 +800,66 @@ function placeTagForCity(city, placeTags) {
       || null;
 }
 
+// Nearest place tag to a raw {lat,lng} point, by geography — a country's
+// own centroid still sits far closer to a point inside that country than
+// any other tagged country's point does, so this resolves correctly
+// whether the matching tag is city- or country-level.
+function nearestPlaceTagForPoint(lat, lng, placeTags) {
+  if (lat == null || lng == null || !Array.isArray(placeTags)) return null;
+  let best = null, bestDist = Infinity;
+  for (const p of placeTags) {
+    if (p.lat == null || p.lng == null) continue;
+    const dLat = (lat - p.lat) * 111;
+    const dLng = (lng - p.lng) * 111 * Math.cos(lat * Math.PI / 180);
+    const dist = Math.hypot(dLat, dLng);
+    if (dist < bestDist) { bestDist = dist; best = p; }
+  }
+  return best;
+}
+
+// Which place tag a stay actually belongs to. Text matching
+// (placeTagForCity) only works when the tag's label is the same city the
+// stay is in — it misses a stay in "Palghar" against a country-level tag
+// labelled "India", even though Palghar plainly is in India. Falls back to
+// the text match when the stay isn't geocoded yet, or no tag has coords.
+function nearestPlaceTag(stay, placeTags) {
+  if (stay?.lat == null || stay?.lng == null) return placeTagForCity(stay?.city, placeTags);
+  return nearestPlaceTagForPoint(stay.lat, stay.lng, placeTags) || placeTagForCity(stay.city, placeTags);
+}
+
+// Days actually planned in a country so far: the span from the earliest
+// known arrival there to the latest known departure, inclusive — not just
+// the sum of booked-stay nights, which undercounts the moment travel
+// continues past the last recorded stay (a flight out a few days after a
+// course ends is still time spent in that country). Arrival/departure come
+// from stays (start/end date) *and* transport legs whose resolved endpoint
+// lands in or leaves from this country. A country tagged as a destination
+// but with nothing planned there yet returns null ("not planned"), rather
+// than silently assuming the visit lasts the whole trip.
+function daysInCountry(cc, stays, transport, placeTags) {
+  let start = null, end = null, matched = false;
+  const extend = (ts, dir) => {
+    if (!ts) return;
+    const day = String(ts).slice(0, 10);
+    if (dir === 'start' && (!start || day < start)) start = day;
+    if (dir === 'end' && (!end || day > end)) end = day;
+  };
+  for (const s of (stays || [])) {
+    if (nearestPlaceTag(s, placeTags)?.country !== cc) continue;
+    matched = true;
+    extend(s.start_date, 'start');
+    extend(s.end_date || s.start_date, 'end');
+  }
+  for (const t of (transport || [])) {
+    const into = nearestPlaceTagForPoint(t.dest_lat, t.dest_lng, placeTags);
+    const from = nearestPlaceTagForPoint(t.origin_lat, t.origin_lng, placeTags);
+    if (into?.country === cc) { matched = true; extend(t.arrival || t.departure, 'start'); }
+    if (from?.country === cc) { matched = true; extend(t.departure, 'end'); }
+  }
+  if (!matched || !start || !end) return null;
+  return Math.round((toDay(end) - toDay(start)) / DAY_MS) + 1;
+}
+
 async function geoForStay(stay, placeTags) {
   const country = (placeTagForCity(stay.city, placeTags)?.country || '').toLowerCase() || null;
   if (stay.address) {
@@ -821,6 +899,16 @@ function loadWorldGeo() {
       .then(j => (worldGeo = j));
   }
   return worldGeoPromise;
+}
+
+// Adjusts toLng so it's the *shortest* way round from fromLng (never more
+// than 180° away) — without this, a leg crossing the antimeridian (e.g.
+// Tokyo <-> Los Angeles) draws almost all the way around the world instead
+// of the short way across the date line.
+function nearestLng(fromLng, toLng) {
+  let d = toLng - fromLng;
+  d -= Math.round(d / 360) * 360;
+  return fromLng + d;
 }
 
 // bbox: {minLat,maxLat,minLng,maxLng}. Fits [minLng,maxLng]x[minLat,maxLat]
@@ -878,7 +966,11 @@ function renderTripMap(canvas, { points = [], legs = [], layoverPoints = [], bbo
     ctx.lineWidth = leg.active ? 3 : 1.5;
     if (leg.active) { ctx.save(); ctx.shadowColor = c; ctx.shadowBlur = 8; }
     ctx.beginPath();
-    path.forEach((p, i) => { const x = px(p.lng), y = py(p.lat); i ? ctx.lineTo(x, y) : ctx.moveTo(x, y); });
+    path.forEach((p, i) => {
+      const lng = i === 0 ? p.lng : nearestLng(path[i - 1].lng, p.lng);
+      const x = px(lng), y = py(p.lat);
+      i ? ctx.lineTo(x, y) : ctx.moveTo(x, y);
+    });
     ctx.stroke();
     if (leg.active) ctx.restore();
   }
@@ -907,10 +999,26 @@ function renderTripMap(canvas, { points = [], legs = [], layoverPoints = [], bbo
   }
 }
 
+// Shared by the per-trip mini-map and the full map view: bbox of a point
+// list, padded ~15%, with a minimum span so a single point isn't a pinpoint.
+function bboxFromPoints(pts) {
+  if (!pts.length) return null;
+  let minLat = 90, maxLat = -90, minLng = 180, maxLng = -180;
+  for (const p of pts) {
+    minLat = Math.min(minLat, p.lat); maxLat = Math.max(maxLat, p.lat);
+    minLng = Math.min(minLng, p.lng); maxLng = Math.max(maxLng, p.lng);
+  }
+  const padLat = Math.max((maxLat - minLat) * 0.15, 1.5);
+  const padLng = Math.max((maxLng - minLng) * 0.15, 1.5);
+  return { minLat: minLat - padLat, maxLat: maxLat + padLat,
+    minLng: minLng - padLng, maxLng: maxLng + padLng };
+}
+
 // Collect a trip's resolved coords — every stay and every transport leg's
-// full origin/destination — so the whole journey fits on the map, not just
-// the stays. `current` (from currentTravelState) flags whichever leg/stay
-// "now" falls inside, so it can be drawn highlighted.
+// full origin/destination — so the whole journey, every line included, fits
+// inside the map (nothing cropped out at the edge). `current` (from
+// currentTravelState) flags whichever leg/stay "now" falls inside, so it
+// can be drawn highlighted.
 function tripMapData(stays, transport, current) {
   const stayPts = (stays || [])
     .filter(s => s.lat != null && s.lng != null)
@@ -927,27 +1035,41 @@ function tripMapData(stays, transport, current) {
     active: current?.kind === 'transport' && current.data.id === t.id,
   }));
 
-  const pts = [...stayPts];
+  const allPts = [...stayPts];
   const layoverPts = [];
   for (const l of legs) {
-    if (l.o) pts.push(l.o);
-    if (l.d) pts.push(l.d);
+    if (l.o) allPts.push(l.o);
+    if (l.d) allPts.push(l.d);
     // layovers are always shown as their own dot, however far — that's the point
-    if (l.l) { pts.push(l.l); layoverPts.push({ ...l.l, id: l.id }); }
+    if (l.l) { allPts.push(l.l); layoverPts.push({ ...l.l, id: l.id }); }
   }
-  if (!pts.length) return null;
-
-  let minLat = 90, maxLat = -90, minLng = 180, maxLng = -180;
-  for (const p of pts) {
-    minLat = Math.min(minLat, p.lat); maxLat = Math.max(maxLat, p.lat);
-    minLng = Math.min(minLng, p.lng); maxLng = Math.max(maxLng, p.lng);
-  }
-  // pad ~15%, and enforce a minimum span so a single-city trip isn't a pinpoint
-  const padLat = Math.max((maxLat - minLat) * 0.15, 1.5);
-  const padLng = Math.max((maxLng - minLng) * 0.15, 1.5);
-  const bbox = { minLat: minLat - padLat, maxLat: maxLat + padLat,
-    minLng: minLng - padLng, maxLng: maxLng + padLng };
+  const bbox = bboxFromPoints(allPts);
+  if (!bbox) return null;
   return { points: stayPts, legs, layoverPoints: layoverPts, bbox };
+}
+
+// Resolve any null coords among a set of rows (one trip's, or many trips'
+// pooled together), write them back, max ~4 concurrent. Used by the Trip
+// tab's mini-map backfill and by the full map view — a connecting flight's
+// layover leg that never got geocoded is exactly what this catches.
+async function backfillGeoRows(stays, transport, placeTags) {
+  const jobs = [];
+  for (const s of (stays || [])) {
+    if (s.lat == null && (s.address || s.city) && s.geo_source !== 'manual')
+      jobs.push(() => resolveStayGeoAwait(s, placeTags));
+  }
+  for (const t of (transport || [])) {
+    const needsO = t.origin_lat == null && t.origin;
+    const needsD = t.dest_lat == null && t.destination;
+    const needsL = t.layover_lat == null && t.layover;
+    if ((needsO || needsD || needsL) && t.geo_source !== 'manual')
+      jobs.push(() => resolveTransportGeoAwait(t));
+  }
+  const queue = jobs.slice();
+  const workers = Array.from({ length: 4 }, async () => {
+    while (queue.length) { const job = queue.shift(); try { await job(); } catch {} }
+  });
+  await Promise.all(workers);
 }
 
 // Resolve any null coords for the open trip's rows, write them back, then
@@ -957,34 +1079,22 @@ async function backfillTripGeo() {
   if (tripGeoBackfilling || !currentTrip) return;
   tripGeoBackfilling = true;
   try {
-    const jobs = [];
-    for (const s of currentStays) {
-      if (s.lat == null && (s.address || s.city) && s.geo_source !== 'manual')
-        jobs.push(() => resolveStayGeoAwait(s));
-    }
-    for (const t of currentTransport) {
-      const needsO = t.origin_lat == null && t.origin;
-      const needsD = t.dest_lat == null && t.destination;
-      const needsL = t.layover_lat == null && t.layover;
-      if ((needsO || needsD || needsL) && t.geo_source !== 'manual')
-        jobs.push(() => resolveTransportGeoAwait(t));
-    }
-    // max ~4 concurrent
-    const queue = jobs.slice();
-    const workers = Array.from({ length: 4 }, async () => {
-      while (queue.length) { const job = queue.shift(); try { await job(); } catch {} }
-    });
-    await Promise.all(workers);
+    await backfillGeoRows(currentStays, currentTransport, currentTrip.place_tags);
   } finally {
     tripGeoBackfilling = false;
   }
   renderTripMapForCurrentTrip();
+  // A stay's just-resolved coords can change which country it's counted
+  // against (see nearestPlaceTag/daysInCountry) — refresh the visa numbers
+  // so they don't stay stuck on "not planned yet" once geocoding catches up.
+  renderVisaHeader(currentTrip);
+  renderVisa(currentDocs, currentTrip);
 }
 
 // await-able variants of the fire-and-forget resolvers (for the backfill pass)
-async function resolveStayGeoAwait(row) {
+async function resolveStayGeoAwait(row, placeTags = currentTrip?.place_tags) {
   if (!row?.id || row.geo_source === 'manual') return;
-  const g = await geoForStay(row, currentTrip?.place_tags);
+  const g = await geoForStay(row, placeTags);
   if (!g) return;
   row.lat = g.lat; row.lng = g.lng; row.geo_source = g.source;
   await sb.from('stays').update({ lat: g.lat, lng: g.lng, geo_source: g.source }).eq('id', row.id);
@@ -1125,11 +1235,14 @@ async function loadProfile() {
   return currentProfile;
 }
 
-// Route after auth: onboarding if no profile / not onboarded, else overview.
+// Route after auth: onboarding if no profile / not onboarded, else back to
+// whichever trip (or the overview) was open last time.
 async function routeAfterAuth() {
   try {
     const p = await loadProfile();
-    if (!p || !p.onboarded_at) openOnboarding();
+    if (!p || !p.onboarded_at) { openOnboarding(); return; }
+    const last = loadLastView();
+    if (last?.view === 'trip' && last.tripId) await openTrip(last.tripId);
     else await routeToOverview();
   } catch (err) {
     console.error('routeAfterAuth:', err);
@@ -1276,7 +1389,14 @@ try { collapsedSections = new Set(JSON.parse(localStorage.getItem('ts_collapsed'
 
 let overviewTrips = [], overviewCharges = {}, overviewCurrent = {};
 
+// Remembers the last view (overview, or a specific trip) across reloads,
+// so reopening the app returns you to where you left off instead of always
+// dropping back to the trips overview.
+function saveLastView(v) { try { localStorage.setItem('ts_last_view', JSON.stringify(v)); } catch {} }
+function loadLastView() { try { return JSON.parse(localStorage.getItem('ts_last_view') || 'null'); } catch { return null; } }
+
 async function routeToOverview() {
+  saveLastView({ view: 'overview' });
   show('overview');
   const list = $('trips-list');
   list.innerHTML = '<p class="empty-note">loading…</p>';
@@ -1425,6 +1545,8 @@ async function openTrip(tripId) {
     sb.from('transport').select('*').eq('trip_id', tripId).order('departure', { ascending: true }),
     sb.auth.getUser(),
   ]);
+  if (!trip) { routeToOverview(); return; }
+  saveLastView({ view: 'trip', tripId });
   const { data: docs } = await sb.from('travel_docs').select('*').eq('user_id', user.user.id);
 
   // Set base currency if the trip has none yet.
@@ -1443,6 +1565,10 @@ async function openTrip(tripId) {
   $('detail-sub').innerHTML = trip
     ? `${placeTagsHTML(trip.place_tags, trip.destination)}<div style="margin-top:4px">${esc(dateRange)}</div>`
     : '';
+
+  // Load once so flight origins/destinations render as "City (CODE)" from
+  // the first paint instead of the raw text, then flipping a moment later.
+  if (currentTransport.some(t => (t.type || '').toLowerCase() === 'flight')) await loadAirports();
 
   renderVisaHeader(trip);
   renderTimeline(currentStays, currentTransport);
@@ -1780,7 +1906,6 @@ async function renderVisaHeader(trip) {
   await loadVisaData();
   const el = $('visa-header');
   const ccs = (trip?.country_codes || []);
-  const tripDays = nights(trip?.start_date, trip?.end_date);
   if (!ccs.length || !(currentProfile?.citizenships || []).length) {
     el.innerHTML = `<div class="esta-label" style="text-align:right">visa — set citizenship &amp; destination</div>`;
     return;
@@ -1793,12 +1918,15 @@ async function renderVisaHeader(trip) {
   }
   if (!worst) { el.innerHTML = `<div class="esta-label" style="text-align:right">no visa needed</div>`; return; }
 
+  // Days actually planned in that specific country so far (not the whole
+  // trip's span — a multi-country trip isn't spent entirely in one place).
+  const ccDays = daysInCountry(worst.cc, currentStays, currentTransport, trip?.place_tags);
   let bar = '';
-  if (worst.days != null && tripDays != null) {
-    const pct = Math.min((tripDays / worst.days) * 100, 100);
-    const tone = tripDays >= worst.days ? 'red' : (tripDays >= worst.days * 0.8 ? 'amber' : 'green');
+  if (worst.days != null && ccDays != null) {
+    const pct = Math.min((ccDays / worst.days) * 100, 100);
+    const tone = ccDays >= worst.days ? 'red' : (ccDays >= worst.days * 0.8 ? 'amber' : 'green');
     bar = `<div class="esta-bar-wrap"><div class="esta-bar ${tone === 'red' ? 'danger' : tone === 'amber' ? 'warn' : ''}" style="width:${pct}%"></div></div>
-           <div class="esta-label" style="text-align:right">${tripDays} / ${worst.days} days</div>`;
+           <div class="esta-label" style="text-align:right">${ccDays} / ${worst.days} days</div>`;
   }
   el.innerHTML = `<span class="visa-badge vb-${worst.tone}">${esc(worst.label)}</span>
     <div class="esta-label" style="text-align:right;margin-top:3px">${flagEmoji(worst.cc)} ${esc(COUNTRY_NAME[worst.cc] || worst.cc)}</div>
@@ -1811,7 +1939,12 @@ const pillClass = (type) => ({ flight: 'pill-flight', bus: 'pill-bus', train: 'p
 function renderTimeline(stays, transport) {
   const items = [
     ...transport.map(t => ({ kind: 'transport', when: t.departure, data: t })),
-    ...stays.map(s => ({ kind: 'stay', when: s.start_date, data: s })),
+    // A stay only has a date, not a time, for when it starts — checking in
+    // obviously happens after you arrive. Sort it as the last moment of its
+    // start day rather than midnight, so a same-day transport leg (a car
+    // ride from the airport, say) that gets you there sorts before it
+    // instead of appearing to happen once you're already checked in.
+    ...stays.map(s => ({ kind: 'stay', when: s.start_date ? s.start_date + 'T23:59:59' : null, data: s })),
   ].filter(i => i.when)
    .sort((a, b) => new Date(a.when) - new Date(b.when));
 
@@ -1864,7 +1997,7 @@ function renderTimeline(stays, transport) {
               <span class="tl-type-pill ${pillClass(type)}">${esc(t.type || 'travel')}</span>
               <span class="tl-date">${esc(fmtDT(t.departure))}</span>
             </div>
-            <div class="tl-title">${esc(t.origin || '')} → ${esc(t.destination || '')}</div>
+            <div class="tl-title">${esc(type === 'flight' ? formatFlightPlace(t.origin) : (t.origin || ''))} → ${esc(type === 'flight' ? formatFlightPlace(t.destination) : (t.destination || ''))}</div>
             <div class="tl-sub">${esc(t.carrier || '')}</div>
             <div class="tl-details">${rows || '<div class="detail-row"><span class="detail-label">No extra detail</span><span class="detail-value"></span></div>'}
               <div class="card-actions"><button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();editTransport('${t.id}')">edit</button></div>
@@ -1874,6 +2007,15 @@ function renderTimeline(stays, transport) {
     } else {
       const s = item.data;
       const n = nights(s.start_date, s.end_date);
+      // For a course, the host (the school/retreat you booked) is the
+      // meaningful headline — the city is secondary context, not the other
+      // way round like a plain stay.
+      const isCourse = (s.type || '').toLowerCase() === 'course' && s.host_name;
+      const titleText = isCourse ? s.host_name : (s.city || '');
+      const subText = [
+        n != null ? `${n} night${n === 1 ? '' : 's'}` : null,
+        isCourse ? s.city : s.host_name,
+      ].filter(Boolean).join(' · ');
       const rows = [
         s.host_name && `<div class="detail-row"><span class="detail-label">Host</span><span class="detail-value">${esc(s.host_name)}</span></div>`,
         s.address && `<div class="detail-row"><span class="detail-label">Address</span><span class="detail-value"><a href="https://maps.google.com/?q=${encodeURIComponent(s.address)}" target="_blank">${esc(s.address)} ↗</a></span></div>`,
@@ -1890,8 +2032,8 @@ function renderTimeline(stays, transport) {
               <span class="tl-type-pill pill-stay">${esc(s.type || 'stay')}</span>
               <span class="tl-date">${esc(fmtDate(s.start_date))} – ${esc(fmtDate(s.end_date))}</span>
             </div>
-            <div class="tl-title">${esc(s.city || '')}</div>
-            <div class="tl-sub">${n != null ? n + ' night' + (n === 1 ? '' : 's') : ''}${s.host_name ? ' · ' + esc(s.host_name) : ''}</div>
+            <div class="tl-title">${esc(titleText)}</div>
+            <div class="tl-sub">${esc(subText)}</div>
             <div class="tl-details">${rows || '<div class="detail-row"><span class="detail-label">No extra detail</span><span class="detail-value"></span></div>'}
               <div class="card-actions"><button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();editStay('${s.id}')">edit</button></div>
             </div>
@@ -1932,8 +2074,20 @@ function renderStays(stays) {
 function renderTransport(transport) {
   const el = $('transport-list');
   if (!transport.length) { el.innerHTML = '<p class="empty-note">No transport.</p>'; return; }
-  const icon = (t) => ({ flight: '✈', bus: '🚌', train: '🚆' }[t] || '•');
+  // Minimal line icons (not platform emoji, which render inconsistently and
+  // clash with the app's monochrome design) — currentColor picks up
+  // whatever pillClass sets, same mode colors as the timeline pills.
+  const TRANSPORT_ICON = {
+    flight: '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 2 11 13"/><path d="M22 2 15 22l-4-9-9-4Z"/></svg>',
+    bus: '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="12" rx="2"/><path d="M3 11h18"/><circle cx="7.5" cy="19" r="1.2" fill="currentColor" stroke="none"/><circle cx="16.5" cy="19" r="1.2" fill="currentColor" stroke="none"/></svg>',
+    train: '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="3" width="16" height="13" rx="4"/><path d="M4 10h16"/><path d="M8 16l-2 4M16 16l2 4"/></svg>',
+  };
+  const CAR_ICON = '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 11l1.5-4.5A2 2 0 0 1 8.4 5h7.2a2 2 0 0 1 1.9 1.5L19 11"/><rect x="3" y="11" width="18" height="6" rx="2"/><circle cx="7.5" cy="19" r="1.2" fill="currentColor" stroke="none"/><circle cx="16.5" cy="19" r="1.2" fill="currentColor" stroke="none"/></svg>';
+  const icon = (t) => TRANSPORT_ICON[t] || CAR_ICON;
   el.innerHTML = transport.map(t => {
+    const isFlight = (t.type || '').toLowerCase() === 'flight';
+    const originText = isFlight ? formatFlightPlace(t.origin) : (t.origin || '');
+    const destText = isFlight ? formatFlightPlace(t.destination) : (t.destination || '');
     const rows = [
       t.booking_code && `<div class="detail-row"><span class="detail-label">Booking</span><span class="detail-value" style="display:flex;align-items:center;gap:6px">${esc(t.booking_code)} <button class="copy-btn" onclick="event.stopPropagation();copyText('${esc(String(t.booking_code).replace(/\s/g,''))}',this)">copy</button></span></div>`,
       t.carrier && `<div class="detail-row"><span class="detail-label">Carrier</span><span class="detail-value">${esc(t.carrier)}</span></div>`,
@@ -1946,8 +2100,8 @@ function renderTransport(transport) {
     ].filter(Boolean).join('');
     return `<div class="info-card" onclick="toggleCard(this)">
       <div class="ic-header">
-        <div><div class="ic-city">${esc(t.origin || '')} → ${esc(t.destination || '')}</div><div class="ic-dates">${esc(fmtDT(t.departure))}${t.carrier ? ' · ' + esc(t.carrier) : ''}</div></div>
-        <span class="ic-tag">${icon((t.type || '').toLowerCase())}</span>
+        <div><div class="ic-city">${esc(originText)} → ${esc(destText)}</div><div class="ic-dates">${esc(fmtDT(t.departure))}${t.carrier ? ' · ' + esc(t.carrier) : ''}</div></div>
+        <span class="ic-tag ic-tag-icon ${pillClass((t.type || '').toLowerCase())}">${icon((t.type || '').toLowerCase())}</span>
       </div>
       <div class="ic-details">${rows}
         <div class="card-actions"><button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();editTransport('${t.id}')">edit</button></div>
@@ -1960,7 +2114,6 @@ function renderTransport(transport) {
 async function renderVisa(docs, trip) {
   await loadVisaData();
   const el = $('visa-list');
-  const tripDays = nights(trip?.start_date, trip?.end_date);
   const ccs = trip?.country_codes || [];
   const cits = (currentProfile?.citizenships || []).filter(Boolean);
 
@@ -1979,19 +2132,31 @@ async function renderVisa(docs, trip) {
       ccs.map(cc => {
         const v = computeVisa(cc);
         if (!v) return `<div class="visa-block"><div class="vb-country">${flagEmoji(cc)} ${esc(COUNTRY_NAME[cc] || cc)}</div><div class="vb-line">No data for this destination — check the official government site.</div></div>`;
+        // Days actually planned in *this* country so far — not the whole
+        // trip's span, which would wrongly assume a multi-country trip is
+        // spent entirely in each tagged country (false alarms on the ones
+        // you're only passing through, false reassurance on the rest).
+        const ccDays = daysInCountry(cc, currentStays, currentTransport, trip?.place_tags);
+        const notPlannedNote = `<div class="vb-line">No stays added for ${esc(COUNTRY_NAME[cc] || cc)} yet — add them here to check the actual length of this visit against the limit.</div>`;
         let bar = '';
-        if (v.days != null && tripDays != null) {
+        if (v.days != null) {
           const label = v.viaDocument ? 'Allowed stay (your visa)' : 'Max visa-free stay';
-          const pct = Math.min((tripDays / v.days) * 100, 100);
-          const tone = tripDays >= v.days ? 'vb-red' : (tripDays >= v.days * 0.8 ? 'vb-amber' : 'vb-green');
-          const barColor = tone === 'vb-red' ? 'var(--red)' : tone === 'vb-amber' ? 'var(--amber)' : 'var(--green)';
-          bar = `<div class="vb-line">${label}: <b>${v.days} days</b></div>
-            <div class="vb-line">This trip: ${tripDays} days
-              <div class="vb-bar-wrap"><div class="vb-bar" style="width:${pct}%;background:${barColor}"></div></div>
-              ${tripDays >= v.days ? `<b style="color:var(--red)">exceeds ${v.viaDocument ? 'your visa\'s' : 'the visa-free'} limit</b>` : tripDays >= v.days * 0.8 ? '<span style="color:var(--amber)">close to the limit</span>' : 'well within'}
-            </div>`;
-        } else if (v.viaDocument && tripDays != null) {
-          bar = `<div class="vb-line">This trip: ${tripDays} days — add the allowed stay length on your visa document to check it against this trip.</div>`;
+          if (ccDays != null) {
+            const pct = Math.min((ccDays / v.days) * 100, 100);
+            const tone = ccDays >= v.days ? 'vb-red' : (ccDays >= v.days * 0.8 ? 'vb-amber' : 'vb-green');
+            const barColor = tone === 'vb-red' ? 'var(--red)' : tone === 'vb-amber' ? 'var(--amber)' : 'var(--green)';
+            bar = `<div class="vb-line">${label}: <b>${v.days} days</b></div>
+              <div class="vb-line">Planned so far: ${ccDays} days
+                <div class="vb-bar-wrap"><div class="vb-bar" style="width:${pct}%;background:${barColor}"></div></div>
+                ${ccDays >= v.days ? `<b style="color:var(--red)">exceeds ${v.viaDocument ? 'your visa\'s' : 'the visa-free'} limit</b>` : ccDays >= v.days * 0.8 ? '<span style="color:var(--amber)">close to the limit</span>' : 'well within'}
+              </div>`;
+          } else {
+            bar = `<div class="vb-line">${label}: <b>${v.days} days</b></div>${notPlannedNote}`;
+          }
+        } else if (v.viaDocument) {
+          bar = ccDays != null
+            ? `<div class="vb-line">Planned so far: ${ccDays} days — add the allowed stay length on your visa document to check it against this trip.</div>`
+            : notPlannedNote;
         }
 
         // Calendar-year cap (e.g. India: 180 days/year) — sourced from the
@@ -2058,7 +2223,10 @@ async function renderVisa(docs, trip) {
           </div>
         </div>`;
       }).join('') +
-      (ccs.some(cc => EU_SCHENGEN.has(cc)) ? schengenBlockHTML(complianceTrips, asOfDate) : '');
+      // Freedom of movement means the 90/180 rule doesn't apply to someone
+      // holding an EU/Schengen-area passport — never show the counter to them,
+      // regardless of which passport ended up "best" for a given destination.
+      (ccs.some(cc => EU_SCHENGEN.has(cc)) && !cits.some(c => EU_SCHENGEN.has(c)) ? schengenBlockHTML(complianceTrips, asOfDate) : '');
   }
 
   // ── Your documents (existing travel_docs CRUD) ─────────────
@@ -2070,7 +2238,8 @@ async function renderVisa(docs, trip) {
     return rank(a) - rank(b);
   });
   const docsHTML = sortedDocs.length ? sortedDocs.map(d => {
-    const days = tripDays;
+    const docCc = ccs.find(cc => countryMatches(d.country, cc));
+    const days = docCc ? daysInCountry(docCc, currentStays, currentTransport, trip?.place_tags) : null;
     // Passport expiry: many countries require 3–6 months' validity beyond
     // travel, so flag inside that window, not just once actually expired.
     const passportWarn = d.doc_type === 'Passport' && d.expires_on ? (() => {
@@ -2159,7 +2328,7 @@ function fieldInner(f, val) {
   }
   const inputType = f.type === 'datetime' ? 'datetime-local' : (f.type === 'date' ? 'date' : (f.type === 'number' ? 'number' : 'text'));
   let iv = v;
-  if (f.type === 'datetime' && v) iv = new Date(v).toISOString().slice(0, 16);
+  if (f.type === 'datetime' && v) iv = toLocalDatetimeInputValue(v);
   if (f.type === 'date' && v) iv = String(v).slice(0, 10);
   const hintEl = f.airportHint ? `<div class="airport-hint" data-hint-for="${f.key}" style="font-size:10px;font-family:'DM Mono',monospace;color:var(--faint);margin-top:4px"></div>` : '';
   return `<div class="field"><label>${esc(f.label)}</label><input type="${inputType}"${f.type === 'number' ? ' step="0.01"' : ''} data-key="${f.key}" value="${esc(iv)}">${hintEl}</div>`;
@@ -2432,7 +2601,7 @@ function openForm(opts) {
 
       // For every other field: don't clobber something already filled in.
       if (el.value && el.value !== '—') continue;
-      if (el.type === 'datetime-local') el.value = new Date(val).toISOString().slice(0, 16);
+      if (el.type === 'datetime-local') el.value = toLocalDatetimeInputValue(val);
       else if (el.type === 'date') el.value = String(val).slice(0, 10);
       else el.value = val;
       any = true;
@@ -2742,13 +2911,6 @@ $('add-transport-btn').addEventListener('click', () => transportForm());
 $('add-transport-btn-2').addEventListener('click', () => transportForm());
 $('add-doc-btn').addEventListener('click', () => docForm());
 
-// Mini-map → full Map view (the #map view lands in a later commit; until then
-// this is a no-op placeholder so the tap target is wired end to end).
-window.openMap = window.openMap || function (opts) { /* #map view — later commit */ void opts; };
-const _tripMapEl = $('trip-map');
-const _openTripMap = () => { if (currentTrip) window.openMap({ focusTripId: currentTrip.id }); };
-_tripMapEl.addEventListener('click', _openTripMap);
-_tripMapEl.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); _openTripMap(); } });
 // Re-fit the canvas on resize/orientation change while a trip is open.
 let _mapResizeT = null;
 window.addEventListener('resize', () => {
