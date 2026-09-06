@@ -787,6 +787,23 @@ function placeTagForCity(city, placeTags) {
       || null;
 }
 
+// Nights actually planned in a country so far: sums stays whose city matches
+// a place tag carrying that country code. A country tagged as a destination
+// but with no stay entered yet returns null ("not planned"), rather than
+// silently assuming the visit lasts the whole trip — which is wrong the
+// moment a trip covers more than one country and false-alarms (or falsely
+// reassures) on every country tagged besides the one actually staying full
+// length.
+function daysInCountry(cc, stays, placeTags) {
+  let total = 0, matched = false;
+  for (const s of (stays || [])) {
+    if (placeTagForCity(s.city, placeTags)?.country !== cc) continue;
+    const n = nights(s.start_date, s.end_date);
+    if (n != null) { total += n; matched = true; }
+  }
+  return matched ? total : null;
+}
+
 async function geoForStay(stay, placeTags) {
   const country = (placeTagForCity(stay.city, placeTags)?.country || '').toLowerCase() || null;
   if (stay.address) {
@@ -1804,7 +1821,6 @@ async function renderVisaHeader(trip) {
   await loadVisaData();
   const el = $('visa-header');
   const ccs = (trip?.country_codes || []);
-  const tripDays = nights(trip?.start_date, trip?.end_date);
   if (!ccs.length || !(currentProfile?.citizenships || []).length) {
     el.innerHTML = `<div class="esta-label" style="text-align:right">visa — set citizenship &amp; destination</div>`;
     return;
@@ -1817,12 +1833,15 @@ async function renderVisaHeader(trip) {
   }
   if (!worst) { el.innerHTML = `<div class="esta-label" style="text-align:right">no visa needed</div>`; return; }
 
+  // Days actually planned in that specific country so far (not the whole
+  // trip's span — a multi-country trip isn't spent entirely in one place).
+  const ccDays = daysInCountry(worst.cc, currentStays, trip?.place_tags);
   let bar = '';
-  if (worst.days != null && tripDays != null) {
-    const pct = Math.min((tripDays / worst.days) * 100, 100);
-    const tone = tripDays >= worst.days ? 'red' : (tripDays >= worst.days * 0.8 ? 'amber' : 'green');
+  if (worst.days != null && ccDays != null) {
+    const pct = Math.min((ccDays / worst.days) * 100, 100);
+    const tone = ccDays >= worst.days ? 'red' : (ccDays >= worst.days * 0.8 ? 'amber' : 'green');
     bar = `<div class="esta-bar-wrap"><div class="esta-bar ${tone === 'red' ? 'danger' : tone === 'amber' ? 'warn' : ''}" style="width:${pct}%"></div></div>
-           <div class="esta-label" style="text-align:right">${tripDays} / ${worst.days} days</div>`;
+           <div class="esta-label" style="text-align:right">${ccDays} / ${worst.days} days</div>`;
   }
   el.innerHTML = `<span class="visa-badge vb-${worst.tone}">${esc(worst.label)}</span>
     <div class="esta-label" style="text-align:right;margin-top:3px">${flagEmoji(worst.cc)} ${esc(COUNTRY_NAME[worst.cc] || worst.cc)}</div>
@@ -1985,7 +2004,6 @@ function renderTransport(transport) {
 async function renderVisa(docs, trip) {
   await loadVisaData();
   const el = $('visa-list');
-  const tripDays = nights(trip?.start_date, trip?.end_date);
   const ccs = trip?.country_codes || [];
   const cits = (currentProfile?.citizenships || []).filter(Boolean);
 
@@ -2004,19 +2022,31 @@ async function renderVisa(docs, trip) {
       ccs.map(cc => {
         const v = computeVisa(cc);
         if (!v) return `<div class="visa-block"><div class="vb-country">${flagEmoji(cc)} ${esc(COUNTRY_NAME[cc] || cc)}</div><div class="vb-line">No data for this destination — check the official government site.</div></div>`;
+        // Days actually planned in *this* country so far — not the whole
+        // trip's span, which would wrongly assume a multi-country trip is
+        // spent entirely in each tagged country (false alarms on the ones
+        // you're only passing through, false reassurance on the rest).
+        const ccDays = daysInCountry(cc, currentStays, trip?.place_tags);
+        const notPlannedNote = `<div class="vb-line">No stays added for ${esc(COUNTRY_NAME[cc] || cc)} yet — add them here to check the actual length of this visit against the limit.</div>`;
         let bar = '';
-        if (v.days != null && tripDays != null) {
+        if (v.days != null) {
           const label = v.viaDocument ? 'Allowed stay (your visa)' : 'Max visa-free stay';
-          const pct = Math.min((tripDays / v.days) * 100, 100);
-          const tone = tripDays >= v.days ? 'vb-red' : (tripDays >= v.days * 0.8 ? 'vb-amber' : 'vb-green');
-          const barColor = tone === 'vb-red' ? 'var(--red)' : tone === 'vb-amber' ? 'var(--amber)' : 'var(--green)';
-          bar = `<div class="vb-line">${label}: <b>${v.days} days</b></div>
-            <div class="vb-line">This trip: ${tripDays} days
-              <div class="vb-bar-wrap"><div class="vb-bar" style="width:${pct}%;background:${barColor}"></div></div>
-              ${tripDays >= v.days ? `<b style="color:var(--red)">exceeds ${v.viaDocument ? 'your visa\'s' : 'the visa-free'} limit</b>` : tripDays >= v.days * 0.8 ? '<span style="color:var(--amber)">close to the limit</span>' : 'well within'}
-            </div>`;
-        } else if (v.viaDocument && tripDays != null) {
-          bar = `<div class="vb-line">This trip: ${tripDays} days — add the allowed stay length on your visa document to check it against this trip.</div>`;
+          if (ccDays != null) {
+            const pct = Math.min((ccDays / v.days) * 100, 100);
+            const tone = ccDays >= v.days ? 'vb-red' : (ccDays >= v.days * 0.8 ? 'vb-amber' : 'vb-green');
+            const barColor = tone === 'vb-red' ? 'var(--red)' : tone === 'vb-amber' ? 'var(--amber)' : 'var(--green)';
+            bar = `<div class="vb-line">${label}: <b>${v.days} days</b></div>
+              <div class="vb-line">Planned so far: ${ccDays} days
+                <div class="vb-bar-wrap"><div class="vb-bar" style="width:${pct}%;background:${barColor}"></div></div>
+                ${ccDays >= v.days ? `<b style="color:var(--red)">exceeds ${v.viaDocument ? 'your visa\'s' : 'the visa-free'} limit</b>` : ccDays >= v.days * 0.8 ? '<span style="color:var(--amber)">close to the limit</span>' : 'well within'}
+              </div>`;
+          } else {
+            bar = `<div class="vb-line">${label}: <b>${v.days} days</b></div>${notPlannedNote}`;
+          }
+        } else if (v.viaDocument) {
+          bar = ccDays != null
+            ? `<div class="vb-line">Planned so far: ${ccDays} days — add the allowed stay length on your visa document to check it against this trip.</div>`
+            : notPlannedNote;
         }
 
         // Calendar-year cap (e.g. India: 180 days/year) — sourced from the
@@ -2095,7 +2125,8 @@ async function renderVisa(docs, trip) {
     return rank(a) - rank(b);
   });
   const docsHTML = sortedDocs.length ? sortedDocs.map(d => {
-    const days = tripDays;
+    const docCc = ccs.find(cc => countryMatches(d.country, cc));
+    const days = docCc ? daysInCountry(docCc, currentStays, trip?.place_tags) : null;
     // Passport expiry: many countries require 3–6 months' validity beyond
     // travel, so flag inside that window, not just once actually expired.
     const passportWarn = d.doc_type === 'Passport' && d.expires_on ? (() => {
