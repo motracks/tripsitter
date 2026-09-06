@@ -242,6 +242,25 @@
   .attach-chip .x { background: none; border: 0; color: var(--muted); cursor: pointer; font-size: 13px; line-height: 1; padding: 0 2px; }
   .attach-chip .x:hover { color: var(--red); }
   .parse-note { font-size: 10px; color: var(--amber); font-family: 'DM Mono', monospace; margin-top: 6px; }
+  .attach-thumb-btn { background: none; border: 0; padding: 0; cursor: pointer; display: inline-block; line-height: 0; }
+
+  /* Full-screenshot gallery (Visa tab) — the plain original images, since
+     an attachment's own inline preview shows just its QR crop. */
+  .doc-gallery { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 8px; }
+  .doc-gallery-item { background: none; border: 0; padding: 0; cursor: pointer;
+    display: flex; flex-direction: column; align-items: center; gap: 4px; width: 92px; }
+  .doc-gallery-item .attach-thumb { max-width: 88px; max-height: 88px; }
+  .doc-gallery-label { font-size: 10px; font-family: 'DM Mono', monospace; color: var(--muted);
+    text-align: center; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 92px; }
+
+  /* Image lightbox — reuses #modal as its backdrop/positioning */
+  .lightbox-box { background: var(--surface); border: 0.5px solid var(--border2); border-radius: 14px;
+    padding: 16px; max-width: 92vw; display: flex; flex-direction: column; align-items: center;
+    gap: 10px; animation: fadeUp 0.2s ease both; }
+  .lightbox-box img { max-width: 100%; max-height: 74vh; border-radius: 8px; background: #fff; }
+  .lightbox-box img.lightbox-qr { padding: 16px; box-sizing: border-box; }
+  .lightbox-actions { display: flex; align-items: center; justify-content: space-between; gap: 12px; width: 100%; }
+  .lightbox-actions a { font-size: 12px; }
 
   /* ONBOARDING / SETTINGS */
   #onboarding { max-width: 460px; margin: 8vh auto 0; padding: 0 1.25rem 3rem; }
@@ -1595,13 +1614,109 @@ function attachmentRow(row) {
     </span>
   </div>`;
 }
+// ---------- QR-code crop (attachment previews) ----------
+// A ticket screenshot's useful preview is the QR code, not the whole photo
+// — this finds it (vendor/jsQR.js, lazy-loaded) and crops tight around it.
+// The uncropped original is never discarded; it's what "view full
+// screenshot" and the Visa tab's document gallery show.
+let jsQRPromise = null;
+function loadJsQR() {
+  if (window.jsQR) return Promise.resolve(window.jsQR);
+  if (!jsQRPromise) {
+    jsQRPromise = new Promise((resolve, reject) => {
+      const s = document.createElement('script');
+      s.src = 'vendor/jsQR.js';
+      s.onload = () => (window.jsQR ? resolve(window.jsQR) : reject(new Error('jsQR did not define window.jsQR')));
+      s.onerror = () => reject(new Error('failed to load vendor/jsQR.js'));
+      document.head.appendChild(s);
+    }).catch((err) => { jsQRPromise = null; throw err; }); // let a later call retry
+  }
+  return jsQRPromise;
+}
+function loadImageEl(src) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.onload = () => resolve(img);
+    img.onerror = () => reject(new Error('image failed to load'));
+    img.src = src;
+  });
+}
+// Returns a cropped data URL tight around the QR code found in the image at
+// `url` (padded ~18%, so a scanner still has a quiet zone), or null if none
+// is found — a plain photo, a low-quality scan, or a same-origin/CORS issue
+// that taints the canvas. Callers fall back to the full image on null.
+async function qrCropDataUrl(url) {
+  const jsQR = await loadJsQR();
+  const img = await loadImageEl(url);
+  const canvas = document.createElement('canvas');
+  canvas.width = img.naturalWidth; canvas.height = img.naturalHeight;
+  const ctx = canvas.getContext('2d');
+  ctx.drawImage(img, 0, 0);
+  const { data } = ctx.getImageData(0, 0, canvas.width, canvas.height);
+  const code = jsQR(data, canvas.width, canvas.height);
+  if (!code?.location) return null;
+  const loc = code.location;
+  const xs = [loc.topLeftCorner.x, loc.topRightCorner.x, loc.bottomLeftCorner.x, loc.bottomRightCorner.x];
+  const ys = [loc.topLeftCorner.y, loc.topRightCorner.y, loc.bottomLeftCorner.y, loc.bottomRightCorner.y];
+  const minX = Math.min(...xs), maxX = Math.max(...xs), minY = Math.min(...ys), maxY = Math.max(...ys);
+  const pad = Math.max(maxX - minX, maxY - minY) * 0.18;
+  const cx = Math.max(0, minX - pad), cy = Math.max(0, minY - pad);
+  const cw = Math.min(canvas.width - cx, (maxX - minX) + pad * 2);
+  const ch = Math.min(canvas.height - cy, (maxY - minY) + pad * 2);
+  const crop = document.createElement('canvas');
+  crop.width = cw; crop.height = ch;
+  crop.getContext('2d').drawImage(canvas, cx, cy, cw, ch, 0, 0, cw, ch);
+  return crop.toDataURL('image/png');
+}
+
+// Big centered view — a cropped QR gets a "view full screenshot" link back
+// to the original; a plain (gallery) image is just shown large.
+function openImageLightbox(src, fullSrc, isQrCrop) {
+  const m = $('modal');
+  m.innerHTML = `<div class="lightbox-box">
+    <img src="${esc(src)}" alt="${isQrCrop ? 'QR code' : 'attachment'}"${isQrCrop ? ' class="lightbox-qr"' : ''}>
+    <div class="lightbox-actions">
+      ${isQrCrop ? `<a href="${esc(fullSrc)}" target="_blank" rel="noopener">view full screenshot ↗</a>` : '<span></span>'}
+      <button type="button" class="btn btn-ghost btn-sm" onclick="closeModal()">close</button>
+    </div>
+  </div>`;
+  m.classList.remove('hidden');
+}
+
 async function hydrateAttachments(container) {
   const slots = container.querySelectorAll('.attach-slot[data-path]');
   for (const slot of slots) {
-    const { data } = await sb.storage.from('tickets').createSignedUrl(slot.dataset.path, 3600);
-    slot.outerHTML = data?.signedUrl
-      ? `<a href="${data.signedUrl}" target="_blank" rel="noopener"><img class="attach-thumb" src="${data.signedUrl}" alt="attachment"></a>`
-      : '<span class="attach-chip">image unavailable</span>';
+    const { data, error } = await sb.storage.from('tickets').createSignedUrl(slot.dataset.path, 3600);
+    if (error || !data?.signedUrl) { slot.outerHTML = '<span class="attach-chip">image unavailable</span>'; continue; }
+    const fullUrl = data.signedUrl;
+    let crop = null;
+    try { crop = await qrCropDataUrl(fullUrl); } catch { crop = null; }
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'attach-thumb-btn';
+    btn.innerHTML = `<img class="attach-thumb" src="${esc(crop || fullUrl)}" alt="attachment">`;
+    btn.addEventListener('click', () => openImageLightbox(crop || fullUrl, fullUrl, !!crop));
+    slot.replaceWith(btn);
+  }
+}
+
+// The plain full-size gallery on the Visa tab — every stay/transport
+// attachment's original screenshot, uncropped, since their inline preview
+// (hydrateAttachments above) now shows just the QR crop.
+async function hydrateDocGallery(container) {
+  const slots = container.querySelectorAll('.doc-gallery-slot[data-path]');
+  for (const slot of slots) {
+    const path = slot.dataset.path, label = slot.dataset.label || '';
+    const { data, error } = await sb.storage.from('tickets').createSignedUrl(path, 3600);
+    if (error || !data?.signedUrl) { slot.outerHTML = '<span class="attach-chip">image unavailable</span>'; continue; }
+    const url = data.signedUrl;
+    const item = document.createElement('button');
+    item.type = 'button';
+    item.className = 'doc-gallery-item';
+    item.innerHTML = `<img class="attach-thumb" src="${esc(url)}" alt="${esc(label)}"><span class="doc-gallery-label">${esc(label)}</span>`;
+    item.addEventListener('click', () => openImageLightbox(url, url, false));
+    slot.replaceWith(item);
   }
 }
 
@@ -2229,6 +2344,26 @@ async function renderVisa(docs, trip) {
       (ccs.some(cc => EU_SCHENGEN.has(cc)) && !cits.some(c => EU_SCHENGEN.has(c)) ? schengenBlockHTML(complianceTrips, asOfDate) : '');
   }
 
+  // ── Full-screenshot gallery ─────────────────────────────────
+  // Every stay/transport attachment's original image, uncropped — since its
+  // own inline preview (hydrateAttachments) now shows just the QR crop,
+  // this is where the whole screenshot (flight/train details, etc.) lives.
+  const galleryItems = [];
+  for (const s of currentStays) {
+    const paths = Array.isArray(s.attachment_paths) ? s.attachment_paths : (s.attachment_path ? [s.attachment_path] : []);
+    for (const p of paths) galleryItems.push({ path: p, label: s.city || 'Stay' });
+  }
+  for (const t of currentTransport) {
+    const paths = Array.isArray(t.attachment_paths) ? t.attachment_paths : (t.attachment_path ? [t.attachment_path] : []);
+    const label = [t.origin, t.destination].filter(Boolean).join(' → ') || (t.type || 'Transport');
+    for (const p of paths) galleryItems.push({ path: p, label });
+  }
+  const docGalleryHTML = galleryItems.length
+    ? `<p class="section-label" style="margin-top:1.5rem">Ticket &amp; document screenshots</p>
+       <div class="doc-gallery">${galleryItems.map(it =>
+         `<span class="doc-gallery-slot" data-path="${esc(it.path)}" data-label="${esc(it.label)}">loading…</span>`).join('')}</div>`
+    : '';
+
   // ── Your documents (existing travel_docs CRUD) ─────────────
   // Relevance first: documents matching one of this trip's tagged countries
   // float to the top (in the order those countries are tagged), then
@@ -2278,9 +2413,11 @@ async function renderVisa(docs, trip) {
       always confirm entry requirements on the destination's official government website
       before you book or travel.
     </div>
+    ${docGalleryHTML}
     <p class="section-label" style="margin-top:1.5rem">Your documents</p>
     ${docsHTML}`;
   hydrateAttachments($('visa-list'));
+  hydrateDocGallery($('visa-list'));
 }
 
 // ---------- CRUD: modal form engine ----------
