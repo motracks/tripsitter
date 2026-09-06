@@ -33,23 +33,6 @@
 
   .wrap { max-width: 560px; margin: 0 auto; }
 
-  /* Full-screen map view */
-  .map-view { position: fixed; inset: 0; z-index: 50; background: var(--bg); display: flex; flex-direction: column; }
-  .map-view header { padding: 1rem 1.25rem; flex-shrink: 0; }
-  .map-canvas-wrap { position: relative; flex: 1; min-height: 0; overflow: hidden; touch-action: none; }
-  .map-canvas-wrap canvas { display: block; width: 100%; height: 100%; cursor: grab; }
-  .map-canvas-wrap canvas:active { cursor: grabbing; }
-  .map-controls { position: absolute; right: 14px; bottom: 14px; display: flex; flex-direction: column; gap: 8px; }
-  .map-controls button { width: 36px; height: 36px; border-radius: 50%; background: var(--surface);
-    border: 0.5px solid var(--border2); color: var(--text); font-size: 18px; line-height: 1; cursor: pointer; }
-  .map-controls button:hover { border-color: var(--green); }
-  .map-legend { position: absolute; left: 14px; bottom: 14px; display: flex; gap: 12px; font-size: 11px;
-    font-family: 'DM Mono', monospace; color: var(--muted); background: var(--surface); border: 0.5px solid var(--border);
-    border-radius: var(--r); padding: 6px 10px; }
-  .map-legend span { display: flex; align-items: center; gap: 5px; }
-  .map-legend i { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
-  .map-current-badge { position: absolute; left: 14px; top: 14px; right: 14px; max-width: 320px; }
-
   /* LOGIN */
   #login { max-width: 360px; margin: 18vh auto 0; padding: 0 1.25rem; }
   #login h1 { font-size: 30px; font-weight: 700; letter-spacing: -0.01em; }
@@ -106,13 +89,8 @@
   .timeline { position: relative; }
   .trip-map { position: relative; width: 100%; aspect-ratio: 16 / 9; max-height: 220px;
     border: 0.5px solid var(--border2); border-radius: var(--r); overflow: hidden;
-    background: var(--surface); margin-bottom: 1rem; cursor: pointer; }
+    background: var(--surface); margin-bottom: 1rem; }
   .trip-map canvas { display: block; width: 100%; height: 100%; }
-  .trip-map:hover { border-color: var(--green); }
-  .trip-map::after { content: 'open map'; position: absolute; right: 8px; bottom: 6px;
-    font-family: 'DM Mono', monospace; font-size: 9px; text-transform: uppercase;
-    letter-spacing: 0.1em; color: var(--muted); background: var(--bg);
-    padding: 2px 6px; border-radius: 6px; pointer-events: none; }
   .tl-line { position: absolute; left: 19px; top: 8px; bottom: 8px; width: 1px; background: var(--border2); }
   .tl-item { display: flex; gap: 14px; margin-bottom: 10px; animation: fadeUp 0.3s ease both; }
   .tl-dot-wrap { flex-shrink: 0; width: 38px; display: flex; flex-direction: column; align-items: center; padding-top: 14px; }
@@ -402,7 +380,6 @@
   <div style="padding:0 1.25rem">
     <div class="ov-controls">
       <input type="search" id="trip-search" placeholder="search trips, places, hosts…" autocomplete="off">
-      <button class="btn btn-ghost btn-sm" id="open-map-btn">map</button>
       <button class="btn btn-green btn-sm" id="new-trip-btn">+ New trip</button>
     </div>
     <div class="card-grid" id="trips-list"></div>
@@ -436,7 +413,7 @@
       <button class="btn btn-green btn-sm" id="add-stay-btn">+ stay</button>
     </div>
     <div class="current-status hidden" id="trip-current-status"></div>
-    <div class="trip-map hidden" id="trip-map" role="button" tabindex="0" aria-label="Open the map for this trip">
+    <div class="trip-map hidden" id="trip-map">
       <canvas id="trip-map-canvas"></canvas>
     </div>
     <p class="section-label">Full timeline</p>
@@ -465,30 +442,6 @@
   </div>
 </div>
 
-<!-- FULL MAP VIEW -->
-<div id="map" class="hidden map-view">
-  <header>
-    <div class="header-left">
-      <button class="backbtn" id="map-back-btn">← all trips</button>
-      <h1>Map</h1>
-    </div>
-  </header>
-  <div class="map-canvas-wrap" id="map-canvas-wrap">
-    <canvas id="map-canvas"></canvas>
-    <div class="current-status hidden map-current-badge" id="map-current-status"></div>
-    <div class="map-legend">
-      <span><i style="background:var(--green)"></i>ongoing</span>
-      <span><i style="background:var(--blue)"></i>upcoming</span>
-      <span><i style="background:var(--faint)"></i>past</span>
-    </div>
-    <div class="map-controls">
-      <button id="map-zoom-in" aria-label="Zoom in">+</button>
-      <button id="map-zoom-out" aria-label="Zoom out">−</button>
-      <button id="map-zoom-reset" aria-label="Fit all trips">⤢</button>
-    </div>
-  </div>
-</div>
-
 <div id="modal" class="hidden"></div>
 
 <script type="module">
@@ -503,7 +456,7 @@ const sb = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 const $ = (id) => document.getElementById(id);
 const esc = (s) => (s == null ? '' : String(s).replace(/[&<>"']/g, c => (
   { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])));
-const show = (id) => { ['login', 'onboarding', 'overview', 'detail', 'map'].forEach(v => $(v).classList.toggle('hidden', v !== id)); };
+const show = (id) => { ['login', 'onboarding', 'overview', 'detail'].forEach(v => $(v).classList.toggle('hidden', v !== id)); };
 
 const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 function fmtDate(d) {
@@ -965,36 +918,9 @@ function bboxFromPoints(pts) {
     minLng: minLng - padLng, maxLng: maxLng + padLng };
 }
 
-// A trip's own local area (stays, or transport ends near them) vs. its full
-// extent (every resolved point, including a long-haul flight's far origin).
-// `coreBbox` frames the *default* view so a transatlantic flight into a
-// single-city trip doesn't zoom the map out until the destination is a
-// speck; `fullBbox` bounds how far you can zoom out from there, so the
-// whole route (lines are always drawn in full, never cropped) is still
-// reachable.
-function tripBboxes(stayPts, legs) {
-  const allPts = [...stayPts];
-  for (const l of legs) { if (l.o) allPts.push(l.o); if (l.d) allPts.push(l.d); }
-  const fullBbox = bboxFromPoints(allPts);
-  if (!fullBbox) return { coreBbox: null, fullBbox: null };
-
-  const core = stayPts.length ? stayPts : allPts;
-  const med = (arr, k) => { const v = arr.map(p => p[k]).sort((a, b) => a - b);
-    return v[Math.floor(v.length / 2)]; };
-  const cLat = med(core, 'lat'), cLng = med(core, 'lng');
-  const near = (p) => {
-    const dLat = (p.lat - cLat) * 111;
-    const dLng = (p.lng - cLng) * 111 * Math.cos(cLat * Math.PI / 180);
-    return Math.hypot(dLat, dLng) <= 1500; // km
-  };
-  const nearPts = allPts.filter(near);
-  const coreBbox = bboxFromPoints(nearPts.length ? nearPts : core);
-  return { coreBbox, fullBbox };
-}
-
 // Collect a trip's resolved coords — every stay and every transport leg's
-// full origin/destination, so lines are always drawn whole — plus the
-// core/full bbox split (see tripBboxes). `current` (from
+// full origin/destination — so the whole journey, every line included, fits
+// inside the map (nothing cropped out at the edge). `current` (from
 // currentTravelState) flags whichever leg/stay "now" falls inside, so it
 // can be drawn highlighted.
 function tripMapData(stays, transport, current) {
@@ -1012,9 +938,11 @@ function tripMapData(stays, transport, current) {
     active: current?.kind === 'transport' && current.data.id === t.id,
   }));
 
-  const { coreBbox, fullBbox } = tripBboxes(stayPts, legs);
-  if (!coreBbox && !fullBbox) return null;
-  return { points: stayPts, legs, bbox: coreBbox || fullBbox, fullBbox };
+  const allPts = [...stayPts];
+  for (const l of legs) { if (l.o) allPts.push(l.o); if (l.d) allPts.push(l.d); }
+  const bbox = bboxFromPoints(allPts);
+  if (!bbox) return null;
+  return { points: stayPts, legs, bbox };
 }
 
 // Resolve any null coords among a set of rows (one trip's, or many trips'
@@ -1098,304 +1026,6 @@ async function renderTripMapForCurrentTrip() {
   wrap.classList.remove('hidden');
   renderTripMap($('trip-map-canvas'), data);
 }
-
-// ---------- full map view ----------
-// Two scopes: 'all' (every trip combined, opened from the overview) and
-// 'trip' (just one trip's own stays + routes, opened from its mini-map).
-// mapAllData always carries { points, legs, tripById, coreBbox, fullBbox }.
-let mapAllData = null;
-let mapReturnTo = null;      // { type: 'overview' } | { type: 'trip', tripId }
-let mapView = { lat: 0, lng: 0, scale: 1 };
-let mapBaseScale = 1;
-let mapScaleBounds = [1, 1];
-let mapPointers = new Map();
-let mapPinchDist = null;
-let mapDragMoved = 0;
-let mapCurrentTripId = null; // which trip's leg/stay is "active" right now, if any
-
-async function loadAllTripsMapData() {
-  const [{ data: trips }, { data: stays }, { data: transport }] = await Promise.all([
-    sb.from('trips').select('id, name, start_date, end_date, status, place_tags'),
-    sb.from('stays').select('id, trip_id, city, start_date, end_date, lat, lng, address, geo_source'),
-    sb.from('transport').select('id, trip_id, type, origin, destination, departure, arrival, origin_lat, origin_lng, dest_lat, dest_lng, geo_source'),
-  ]);
-  const tripById = Object.fromEntries((trips || []).map(t => [t.id, t]));
-  const staysByTrip = {}, transportByTrip = {};
-  for (const s of (stays || [])) (staysByTrip[s.trip_id] ??= []).push(s);
-  for (const t of (transport || [])) (transportByTrip[t.trip_id] ??= []).push(t);
-
-  // catch any row (a layover leg included) that never got geocoded
-  await Promise.all((trips || []).map(t =>
-    backfillGeoRows(staysByTrip[t.id] || [], transportByTrip[t.id] || [], t.place_tags)));
-
-  // which single leg/stay (if any) is happening right now, across all trips
-  let activeStayId = null, activeLegId = null;
-  mapCurrentTripId = null;
-  for (const t of (trips || [])) {
-    if (tripStatus(t) !== 'ongoing') continue;
-    const state = currentTravelState(staysByTrip[t.id] || [], transportByTrip[t.id] || []);
-    if (!state) continue;
-    mapCurrentTripId = t.id;
-    if (state.kind === 'stay') activeStayId = state.data.id; else activeLegId = state.data.id;
-    break;
-  }
-
-  const points = (stays || [])
-    .filter(s => s.lat != null && s.lng != null)
-    .map(s => ({
-      lat: s.lat, lng: s.lng, id: s.id, tripId: s.trip_id, label: s.city,
-      status: tripById[s.trip_id] ? tripStatus(tripById[s.trip_id]) : 'done',
-      active: s.id === activeStayId,
-    }));
-  const legs = (transport || [])
-    .filter(t => t.origin_lat != null && t.origin_lng != null && t.dest_lat != null && t.dest_lng != null)
-    .map(t => ({
-      id: t.id, tripId: t.trip_id, mode: (t.type || 'other').toLowerCase(), destination: t.destination,
-      o: { lat: t.origin_lat, lng: t.origin_lng }, d: { lat: t.dest_lat, lng: t.dest_lng },
-      status: tripById[t.trip_id] ? tripStatus(tripById[t.trip_id]) : 'done',
-      active: t.id === activeLegId,
-    }));
-  const allPts = [...points];
-  for (const l of legs) { allPts.push(l.o); allPts.push(l.d); }
-  const fullBbox = bboxFromPoints(allPts);
-  return { points, legs, tripById, coreBbox: null, fullBbox };
-}
-
-// Just one trip's own stays + routes — nothing from any other trip ever
-// enters this data set, so panning/zooming out never reveals another trip.
-async function loadTripMapData(tripId) {
-  const [{ data: trip }, { data: stays }, { data: transport }] = await Promise.all([
-    sb.from('trips').select('id, name, start_date, end_date, status, place_tags').eq('id', tripId).single(),
-    sb.from('stays').select('id, trip_id, city, start_date, end_date, lat, lng, address, geo_source').eq('trip_id', tripId),
-    sb.from('transport').select('id, trip_id, type, origin, destination, departure, arrival, origin_lat, origin_lng, dest_lat, dest_lng, geo_source').eq('trip_id', tripId),
-  ]);
-  await backfillGeoRows(stays || [], transport || [], trip?.place_tags);
-
-  const status = trip ? tripStatus(trip) : 'done';
-  const state = currentTravelState(stays || [], transport || []);
-  mapCurrentTripId = state ? tripId : null;
-
-  const points = (stays || [])
-    .filter(s => s.lat != null && s.lng != null)
-    .map(s => ({
-      lat: s.lat, lng: s.lng, id: s.id, tripId, label: s.city, status,
-      active: state?.kind === 'stay' && state.data.id === s.id,
-    }));
-  const legs = (transport || [])
-    .filter(t => t.origin_lat != null && t.origin_lng != null && t.dest_lat != null && t.dest_lng != null)
-    .map(t => ({
-      id: t.id, tripId, mode: (t.type || 'other').toLowerCase(), destination: t.destination,
-      o: { lat: t.origin_lat, lng: t.origin_lng }, d: { lat: t.dest_lat, lng: t.dest_lng },
-      status, active: state?.kind === 'transport' && state.data.id === t.id,
-    }));
-  const { coreBbox, fullBbox } = tripBboxes(points, legs);
-  return { points, legs, tripById: trip ? { [trip.id]: trip } : {}, coreBbox, fullBbox };
-}
-
-function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
-
-// `bbox` frames the default view; `zoomOutBbox` (if wider) sets how far you
-// can zoom out from there — lets a trip-scoped map default to its local
-// area while still reaching the full route (e.g. a long-haul flight's
-// origin) by zooming out.
-function fitMapView(bbox, zoomOutBbox) {
-  const canvas = $('map-canvas');
-  const cssW = canvas.clientWidth || 320, cssH = canvas.clientHeight || 480;
-  const scaleFor = (bb) => {
-    const lngSpan = Math.max(bb.maxLng - bb.minLng, 0.05);
-    const latSpan = Math.max(bb.maxLat - bb.minLat, 0.05);
-    return Math.min(cssW / lngSpan, cssH / latSpan);
-  };
-  mapBaseScale = scaleFor(bbox);
-  const outScale = zoomOutBbox ? scaleFor(zoomOutBbox) : mapBaseScale * 0.3;
-  mapScaleBounds = [Math.min(outScale, mapBaseScale), mapBaseScale * 60];
-  mapView = { lat: (bbox.minLat + bbox.maxLat) / 2, lng: (bbox.minLng + bbox.maxLng) / 2, scale: mapBaseScale };
-}
-
-function renderMapCanvas() {
-  const canvas = $('map-canvas');
-  if (!canvas || !worldGeo || !mapAllData) return;
-  const dpr = Math.min(window.devicePixelRatio || 1, 2);
-  const cssW = canvas.clientWidth || 320, cssH = canvas.clientHeight || 480;
-  canvas.width = cssW * dpr; canvas.height = cssH * dpr;
-  const ctx = canvas.getContext('2d');
-  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  ctx.clearRect(0, 0, cssW, cssH);
-
-  const styles = getComputedStyle(document.documentElement);
-  const col = (n, f) => (styles.getPropertyValue(n).trim() || f);
-  const landFill = col('--surface2', '#1e2220');
-  const landStroke = col('--border2', 'rgba(255,255,255,0.12)');
-  const statusCol = { ongoing: col('--green', '#4ade9a'), upcoming: col('--blue', '#60aaff'), done: col('--faint', 'rgba(240,237,232,0.18)') };
-
-  const s = mapView.scale;
-  const px = (lng) => cssW / 2 + (lng - mapView.lng) * s;
-  const py = (lat) => cssH / 2 - (lat - mapView.lat) * s;
-
-  ctx.fillStyle = landFill; ctx.strokeStyle = landStroke; ctx.lineWidth = 0.5;
-  const drawRing = (ring) => {
-    ctx.beginPath();
-    ring.forEach(([lng, lat], i) => { const x = px(lng), y = py(lat); i ? ctx.lineTo(x, y) : ctx.moveTo(x, y); });
-    ctx.closePath(); ctx.fill(); ctx.stroke();
-  };
-  for (const f of worldGeo.features) {
-    const g = f.geometry; if (!g) continue;
-    const polys = g.type === 'Polygon' ? [g.coordinates] : g.type === 'MultiPolygon' ? g.coordinates : [];
-    for (const poly of polys) for (const ring of poly) drawRing(ring);
-  }
-
-  ctx.lineCap = 'round';
-  for (const leg of mapAllData.legs) {
-    const c = statusCol[leg.status] || statusCol.done;
-    ctx.strokeStyle = c;
-    ctx.lineWidth = leg.active ? 3 : (leg.status === 'done' ? 1 : 1.5);
-    if (leg.active) { ctx.save(); ctx.shadowColor = c; ctx.shadowBlur = 8; }
-    ctx.beginPath();
-    ctx.moveTo(px(leg.o.lng), py(leg.o.lat));
-    ctx.lineTo(px(nearestLng(leg.o.lng, leg.d.lng)), py(leg.d.lat));
-    ctx.stroke();
-    if (leg.active) ctx.restore();
-  }
-
-  for (const p of mapAllData.points) {
-    const x = px(p.lng), y = py(p.lat);
-    const c = statusCol[p.status] || statusCol.done;
-    if (p.active) {
-      ctx.save(); ctx.globalAlpha = 0.25;
-      ctx.beginPath(); ctx.arc(x, y, 9, 0, Math.PI * 2); ctx.fillStyle = c; ctx.fill();
-      ctx.restore();
-    }
-    ctx.beginPath(); ctx.arc(x, y, p.active ? 5 : 4, 0, Math.PI * 2);
-    ctx.fillStyle = c; ctx.fill();
-    ctx.strokeStyle = col('--bg', '#0d0f0e'); ctx.lineWidth = 1.5; ctx.stroke();
-  }
-}
-
-// Screen-space nearest-point hit test, used to open a trip on tap/click.
-function mapHitTest(clientX, clientY) {
-  const canvas = $('map-canvas');
-  const rect = canvas.getBoundingClientRect();
-  const mx = clientX - rect.left, my = clientY - rect.top;
-  const px = (lng) => rect.width / 2 + (lng - mapView.lng) * mapView.scale;
-  const py = (lat) => rect.height / 2 - (lat - mapView.lat) * mapView.scale;
-  let best = null, bestDist = 16; // px threshold
-  for (const p of (mapAllData?.points || [])) {
-    const d = Math.hypot(px(p.lng) - mx, py(p.lat) - my);
-    if (d < bestDist) { bestDist = d; best = p.tripId; }
-  }
-  return best;
-}
-
-function zoomMapBy(factor, aroundClientX, aroundClientY) {
-  const canvas = $('map-canvas');
-  const rect = canvas.getBoundingClientRect();
-  const mx = aroundClientX != null ? aroundClientX - rect.left : rect.width / 2;
-  const my = aroundClientY != null ? aroundClientY - rect.top : rect.height / 2;
-  const beforeLng = mapView.lng + (mx - rect.width / 2) / mapView.scale;
-  const beforeLat = mapView.lat - (my - rect.height / 2) / mapView.scale;
-  mapView.scale = clamp(mapView.scale * factor, mapScaleBounds[0], mapScaleBounds[1]);
-  const afterLng = mapView.lng + (mx - rect.width / 2) / mapView.scale;
-  const afterLat = mapView.lat - (my - rect.height / 2) / mapView.scale;
-  mapView.lng += beforeLng - afterLng;
-  mapView.lat += beforeLat - afterLat;
-  renderMapCanvas();
-}
-
-let mapListenersWired = false;
-function wireMapInteraction() {
-  if (mapListenersWired) return;
-  mapListenersWired = true;
-  const canvas = $('map-canvas');
-
-  canvas.addEventListener('wheel', (e) => {
-    e.preventDefault();
-    zoomMapBy(Math.pow(1.0015, -e.deltaY), e.clientX, e.clientY);
-  }, { passive: false });
-
-  canvas.addEventListener('pointerdown', (e) => {
-    canvas.setPointerCapture(e.pointerId);
-    mapPointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
-    mapDragMoved = 0;
-  });
-  canvas.addEventListener('pointermove', (e) => {
-    if (!mapPointers.has(e.pointerId)) return;
-    const prev = mapPointers.get(e.pointerId);
-    mapPointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
-    if (mapPointers.size === 1) {
-      const dx = e.clientX - prev.x, dy = e.clientY - prev.y;
-      mapDragMoved += Math.abs(dx) + Math.abs(dy);
-      mapView.lng -= dx / mapView.scale;
-      mapView.lat += dy / mapView.scale;
-      renderMapCanvas();
-    } else if (mapPointers.size === 2) {
-      const pts = [...mapPointers.values()];
-      const dist = Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y);
-      if (mapPinchDist != null) zoomMapBy(dist / mapPinchDist);
-      mapPinchDist = dist;
-    }
-  });
-  const endPointer = (e) => {
-    const wasTap = mapPointers.size === 1 && mapDragMoved < 6;
-    mapPointers.delete(e.pointerId);
-    if (mapPointers.size < 2) mapPinchDist = null;
-    // Tap-to-jump only makes sense in the all-trips view — in a trip-scoped
-    // map there's nowhere else to go.
-    if (wasTap && mapReturnTo?.type !== 'trip') {
-      const tripId = mapHitTest(e.clientX, e.clientY);
-      if (tripId) openTrip(tripId);
-    }
-  };
-  canvas.addEventListener('pointerup', endPointer);
-  canvas.addEventListener('pointercancel', endPointer);
-
-  $('map-zoom-in').addEventListener('click', () => zoomMapBy(1.4));
-  $('map-zoom-out').addEventListener('click', () => zoomMapBy(1 / 1.4));
-  $('map-zoom-reset').addEventListener('click', () => {
-    if (!mapAllData?.fullBbox) return;
-    fitMapView(mapAllData.fullBbox, mapAllData.fullBbox);
-    renderMapCanvas();
-  });
-
-  window.addEventListener('resize', () => { if (!$('map').classList.contains('hidden')) renderMapCanvas(); });
-}
-
-function renderMapCurrentStatus() {
-  const el = $('map-current-status');
-  const trip = mapCurrentTripId ? mapAllData.tripById[mapCurrentTripId] : null;
-  if (!trip) { el.classList.add('hidden'); el.innerHTML = ''; return; }
-  const leg = mapAllData.legs.find(l => l.active);
-  const stay = mapAllData.points.find(p => p.active);
-  const text = leg ? currentStatusText({ kind: 'transport', data: { type: leg.mode, destination: leg.destination } })
-    : stay ? `Currently in ${stay.label || ''}` : '';
-  el.classList.remove('hidden');
-  el.innerHTML = `<span class="status-dot${leg ? ' pulse' : ''}"></span> ${esc(trip.name || '')}${text ? ' · ' + esc(text) : ''}`;
-}
-
-// opts.focusTripId → just that trip's own stays + routes (mini-map tap).
-// No opts → every trip combined (overview's "map" button).
-window.openMap = async function openMap(opts) {
-  show('map');
-  wireMapInteraction();
-  await loadWorldGeo();
-
-  const tripId = opts?.focusTripId;
-  if (tripId) {
-    mapReturnTo = { type: 'trip', tripId };
-    mapAllData = await loadTripMapData(tripId);
-  } else {
-    mapReturnTo = { type: 'overview' };
-    mapAllData = await loadAllTripsMapData();
-  }
-  renderMapCurrentStatus();
-
-  const bbox = mapAllData.coreBbox || mapAllData.fullBbox;
-  if (bbox) fitMapView(bbox, mapAllData.fullBbox);
-  renderMapCanvas();
-};
-$('map-back-btn').addEventListener('click', () => {
-  if (mapReturnTo?.type === 'trip') openTrip(mapReturnTo.tripId);
-  else routeToOverview();
-});
 
 // Ensure a stay/transport row has amount_base in the trip's base currency,
 // converted at the rate for the day it was entered. Writes the cache back to
@@ -3082,7 +2712,6 @@ window.editDoc = (id) => docForm(currentDocs.find(x => x.id === id));
 
 // ---------- boot ----------
 $('new-trip-btn').addEventListener('click', newTrip);
-$('open-map-btn').addEventListener('click', () => window.openMap());
 $('edit-trip-btn').addEventListener('click', editTrip);
 $('add-stay-btn').addEventListener('click', () => stayForm());
 $('add-stay-btn-2').addEventListener('click', () => stayForm());
@@ -3090,11 +2719,6 @@ $('add-transport-btn').addEventListener('click', () => transportForm());
 $('add-transport-btn-2').addEventListener('click', () => transportForm());
 $('add-doc-btn').addEventListener('click', () => docForm());
 
-// Mini-map → full Map view, pre-zoomed to the open trip.
-const _tripMapEl = $('trip-map');
-const _openTripMap = () => { if (currentTrip) window.openMap({ focusTripId: currentTrip.id }); };
-_tripMapEl.addEventListener('click', _openTripMap);
-_tripMapEl.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); _openTripMap(); } });
 // Re-fit the canvas on resize/orientation change while a trip is open.
 let _mapResizeT = null;
 window.addEventListener('resize', () => {
