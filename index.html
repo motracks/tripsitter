@@ -1854,7 +1854,12 @@ const pillClass = (type) => ({ flight: 'pill-flight', bus: 'pill-bus', train: 'p
 function renderTimeline(stays, transport) {
   const items = [
     ...transport.map(t => ({ kind: 'transport', when: t.departure, data: t })),
-    ...stays.map(s => ({ kind: 'stay', when: s.start_date, data: s })),
+    // A stay only has a date, not a time, for when it starts — checking in
+    // obviously happens after you arrive. Sort it as the last moment of its
+    // start day rather than midnight, so a same-day transport leg (a car
+    // ride from the airport, say) that gets you there sorts before it
+    // instead of appearing to happen once you're already checked in.
+    ...stays.map(s => ({ kind: 'stay', when: s.start_date ? s.start_date + 'T23:59:59' : null, data: s })),
   ].filter(i => i.when)
    .sort((a, b) => new Date(a.when) - new Date(b.when));
 
@@ -2113,7 +2118,10 @@ async function renderVisa(docs, trip) {
           </div>
         </div>`;
       }).join('') +
-      (ccs.some(cc => EU_SCHENGEN.has(cc)) ? schengenBlockHTML(complianceTrips, asOfDate) : '');
+      // Freedom of movement means the 90/180 rule doesn't apply to someone
+      // holding an EU/Schengen-area passport — never show the counter to them,
+      // regardless of which passport ended up "best" for a given destination.
+      (ccs.some(cc => EU_SCHENGEN.has(cc)) && !cits.some(c => EU_SCHENGEN.has(c)) ? schengenBlockHTML(complianceTrips, asOfDate) : '');
   }
 
   // ── Your documents (existing travel_docs CRUD) ─────────────
