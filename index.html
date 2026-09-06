@@ -720,6 +720,16 @@ function cityOnly(text) {
   return String(text || '').replace(/\s*\([^)]*\)\s*/g, ' ').replace(/\s+/g, ' ').trim();
 }
 
+// Normalizes a flight endpoint to "City (CODE)" however it was originally
+// typed in — "BOM Mumbai T2", "Mumbai", "ZRH" all become "Mumbai (BOM)" /
+// "Zurich (ZRH)" once the airport table (loadAirports()) is loaded. Falls
+// back to the raw text when no IATA code can be resolved.
+function formatFlightPlace(text) {
+  const iata = extractIATA(text);
+  const a = iata && AIRPORTS ? AIRPORTS[iata] : null;
+  return a ? `${a.city || a.name} (${iata})` : (text || '');
+}
+
 async function geocode(q, country) {
   q = String(q || '').trim();
   if (q.length < 2) return null;
@@ -1455,6 +1465,10 @@ async function openTrip(tripId) {
     ? `${placeTagsHTML(trip.place_tags, trip.destination)}<div style="margin-top:4px">${esc(dateRange)}</div>`
     : '';
 
+  // Load once so flight origins/destinations render as "City (CODE)" from
+  // the first paint instead of the raw text, then flipping a moment later.
+  if (currentTransport.some(t => (t.type || '').toLowerCase() === 'flight')) await loadAirports();
+
   renderVisaHeader(trip);
   renderTimeline(currentStays, currentTransport);
   renderTripMapForCurrentTrip();
@@ -1873,7 +1887,7 @@ function renderTimeline(stays, transport) {
               <span class="tl-type-pill ${pillClass(type)}">${esc(t.type || 'travel')}</span>
               <span class="tl-date">${esc(fmtDT(t.departure))}</span>
             </div>
-            <div class="tl-title">${esc(t.origin || '')} → ${esc(t.destination || '')}</div>
+            <div class="tl-title">${esc(type === 'flight' ? formatFlightPlace(t.origin) : (t.origin || ''))} → ${esc(type === 'flight' ? formatFlightPlace(t.destination) : (t.destination || ''))}</div>
             <div class="tl-sub">${esc(t.carrier || '')}</div>
             <div class="tl-details">${rows || '<div class="detail-row"><span class="detail-label">No extra detail</span><span class="detail-value"></span></div>'}
               <div class="card-actions"><button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();editTransport('${t.id}')">edit</button></div>
@@ -1943,6 +1957,9 @@ function renderTransport(transport) {
   if (!transport.length) { el.innerHTML = '<p class="empty-note">No transport.</p>'; return; }
   const icon = (t) => ({ flight: '✈', bus: '🚌', train: '🚆' }[t] || '•');
   el.innerHTML = transport.map(t => {
+    const isFlight = (t.type || '').toLowerCase() === 'flight';
+    const originText = isFlight ? formatFlightPlace(t.origin) : (t.origin || '');
+    const destText = isFlight ? formatFlightPlace(t.destination) : (t.destination || '');
     const rows = [
       t.booking_code && `<div class="detail-row"><span class="detail-label">Booking</span><span class="detail-value" style="display:flex;align-items:center;gap:6px">${esc(t.booking_code)} <button class="copy-btn" onclick="event.stopPropagation();copyText('${esc(String(t.booking_code).replace(/\s/g,''))}',this)">copy</button></span></div>`,
       t.carrier && `<div class="detail-row"><span class="detail-label">Carrier</span><span class="detail-value">${esc(t.carrier)}</span></div>`,
@@ -1954,7 +1971,7 @@ function renderTransport(transport) {
     ].filter(Boolean).join('');
     return `<div class="info-card" onclick="toggleCard(this)">
       <div class="ic-header">
-        <div><div class="ic-city">${esc(t.origin || '')} → ${esc(t.destination || '')}</div><div class="ic-dates">${esc(fmtDT(t.departure))}${t.carrier ? ' · ' + esc(t.carrier) : ''}</div></div>
+        <div><div class="ic-city">${esc(originText)} → ${esc(destText)}</div><div class="ic-dates">${esc(fmtDT(t.departure))}${t.carrier ? ' · ' + esc(t.carrier) : ''}</div></div>
         <span class="ic-tag">${icon((t.type || '').toLowerCase())}</span>
       </div>
       <div class="ic-details">${rows}
