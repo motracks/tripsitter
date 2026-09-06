@@ -110,6 +110,8 @@
   .pill-bus { background: var(--green-dim); color: var(--green); }
   .pill-train { background: var(--amber-dim); color: var(--amber); }
   .pill-stay { background: var(--faint); color: var(--muted); }
+  .ic-tag.ic-tag-icon { display: inline-flex; align-items: center; justify-content: center; width: 26px; height: 22px; padding: 0; }
+  .ic-tag-icon svg { display: block; }
 
   .tl-date { font-size: 11px; font-family: 'DM Mono', monospace; color: var(--muted); }
   .tl-title { font-size: 15px; font-weight: 600; margin-top: 6px; line-height: 1.3; }
@@ -2047,7 +2049,16 @@ function renderStays(stays) {
 function renderTransport(transport) {
   const el = $('transport-list');
   if (!transport.length) { el.innerHTML = '<p class="empty-note">No transport.</p>'; return; }
-  const icon = (t) => ({ flight: '✈', bus: '🚌', train: '🚆' }[t] || '•');
+  // Minimal line icons (not platform emoji, which render inconsistently and
+  // clash with the app's monochrome design) — currentColor picks up
+  // whatever pillClass sets, same mode colors as the timeline pills.
+  const TRANSPORT_ICON = {
+    flight: '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 2 11 13"/><path d="M22 2 15 22l-4-9-9-4Z"/></svg>',
+    bus: '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="12" rx="2"/><path d="M3 11h18"/><circle cx="7.5" cy="19" r="1.2" fill="currentColor" stroke="none"/><circle cx="16.5" cy="19" r="1.2" fill="currentColor" stroke="none"/></svg>',
+    train: '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="3" width="16" height="13" rx="4"/><path d="M4 10h16"/><path d="M8 16l-2 4M16 16l2 4"/></svg>',
+  };
+  const CAR_ICON = '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 11l1.5-4.5A2 2 0 0 1 8.4 5h7.2a2 2 0 0 1 1.9 1.5L19 11"/><rect x="3" y="11" width="18" height="6" rx="2"/><circle cx="7.5" cy="19" r="1.2" fill="currentColor" stroke="none"/><circle cx="16.5" cy="19" r="1.2" fill="currentColor" stroke="none"/></svg>';
+  const icon = (t) => TRANSPORT_ICON[t] || CAR_ICON;
   el.innerHTML = transport.map(t => {
     const isFlight = (t.type || '').toLowerCase() === 'flight';
     const originText = isFlight ? formatFlightPlace(t.origin) : (t.origin || '');
@@ -2064,7 +2075,7 @@ function renderTransport(transport) {
     return `<div class="info-card" onclick="toggleCard(this)">
       <div class="ic-header">
         <div><div class="ic-city">${esc(originText)} → ${esc(destText)}</div><div class="ic-dates">${esc(fmtDT(t.departure))}${t.carrier ? ' · ' + esc(t.carrier) : ''}</div></div>
-        <span class="ic-tag">${icon((t.type || '').toLowerCase())}</span>
+        <span class="ic-tag ic-tag-icon ${pillClass((t.type || '').toLowerCase())}">${icon((t.type || '').toLowerCase())}</span>
       </div>
       <div class="ic-details">${rows}
         <div class="card-actions"><button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();editTransport('${t.id}')">edit</button></div>
