@@ -68,6 +68,11 @@ alter table transport add column if not exists origin_lng double precision;
 alter table transport add column if not exists dest_lat double precision;
 alter table transport add column if not exists dest_lng double precision;
 alter table transport add column if not exists geo_source text;  -- 'iata' | 'station' | 'city' | 'manual' | 'partial' | null
+-- Optional single connecting stopover (e.g. "Abu Dhabi (AUH)"), shown as its
+-- own dot on the trip map.
+alter table transport add column if not exists layover text;
+alter table transport add column if not exists layover_lat double precision;
+alter table transport add column if not exists layover_lng double precision;
 
 create table if not exists travel_docs (
   id               uuid primary key default gen_random_uuid(),
