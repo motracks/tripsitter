@@ -8,18 +8,26 @@
 // those are visible on the ticket. (Google's consumer AI Studio tier may use
 // submitted data to improve their products; a paid API tier does not.)
 
-const COMMON = `
+function buildCommon() {
+  const today = new Date().toISOString().slice(0, 10);
+  return `
 The image(s) may be a photo, a screenshot, or a forwarded email with the
 details buried in prose. Read everything, including body text. Be decisive:
 if a value is stated or clearly implied, extract it — do not leave a field
 blank just because it isn't in a labelled box. If several images are given,
 combine them. If there are multiple prices, pick the one that represents the
 main cost of THIS booking (ignore optional add-ons and "not included" notes).
-Dates with a written month ("September 7th 2026") → ISO. Return {} only if
-the image genuinely contains none of the requested information.`;
+Dates with a written month ("September 7th 2026") → ISO, including the year
+printed on the document. Today's date is ${today} — if a date is printed
+WITHOUT a year (e.g. just "11 Oct" or "Mon 11 Oct, 15:30"), assume the
+nearest occurrence of that month/day that is on or after today, not a past
+year, unless other text on the document clearly states or implies a
+different (e.g. past) year. Return {} only if the image genuinely contains
+none of the requested information.`;
+}
 
-const SCHEMAS = {
-  transport: `${COMMON}
+const SCHEMA_BODIES = {
+  transport: `
 Return a JSON object with any of these keys you can determine:
   type: one of "flight" | "bus" | "train" | "ferry" | "car"
   origin: departure city / airport / station, human readable
@@ -31,7 +39,7 @@ Return a JSON object with any of these keys you can determine:
   price: number only (no currency symbol)
   currency: ISO 4217 code (e.g. EUR, USD, INR)
   notes: anything useful that doesn't fit above (pickup contact, luggage, etc.)`,
-  stay: `${COMMON}
+  stay: `
 Return a JSON object with any of these keys you can determine:
   type: the purpose of the stay — exactly one of:
         "hotel", "hostel", "airbnb" (short-term rental), "guesthouse" (B&B / homestay),
@@ -53,7 +61,7 @@ Return a JSON object with any of these keys you can determine:
   price: number only — the main cost of the stay / course (no symbol)
   currency: ISO 4217 code
   notes: meal times, what's included/excluded, contacts, room category, etc.`,
-  doc: `${COMMON}
+  doc: `
 Return a JSON object with any of these keys you can determine:
   doc_type: one of "ESTA" | "Visa" | "Global Entry" | "Passport" | "Vaccination" | "Insurance" | "other"
   country: country the document is for
@@ -75,6 +83,7 @@ Return a JSON object with any of these keys you can determine:
         cap. Omit if none is stated.
   notes: anything else useful that the two fields above didn't capture`,
 };
+const buildSchema = (kind) => SCHEMA_BODIES[kind] ? buildCommon() + SCHEMA_BODIES[kind] : null;
 
 // Tried in order; first that responds wins. Flash-tier vision models
 // confirmed available on the project's key (see GET ?models).
@@ -125,7 +134,8 @@ export default async function handler(req, res) {
     else if (body.image) images = [{ data: body.image, mime: body.mime }];
     images = images.filter(i => i.data).slice(0, 4);
     if (!images.length) return res.status(400).json({ error: 'bad request', detail: 'no image' });
-    if (!SCHEMAS[kind]) return res.status(400).json({ error: 'bad request', detail: 'unknown kind: ' + kind });
+    const schema = buildSchema(kind);
+    if (!schema) return res.status(400).json({ error: 'bad request', detail: 'unknown kind: ' + kind });
 
     const sys =
       'You extract travel logistics from photos, screenshots, or forwarded emails. ' +
@@ -138,7 +148,7 @@ export default async function handler(req, res) {
         role: 'user',
         parts: [
           ...images.map(i => ({ inlineData: { mimeType: i.mime || 'image/jpeg', data: i.data } })),
-          { text: sys + '\n\n' + SCHEMAS[kind] },
+          { text: sys + '\n\n' + schema },
         ],
       }],
       generationConfig: { temperature: 0, responseMimeType: 'application/json', maxOutputTokens: 2048 },
