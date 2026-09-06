@@ -1370,6 +1370,7 @@ async function openTrip(tripId) {
   renderTimeline(currentStays, currentTransport);
   renderTripMapForCurrentTrip();
   backfillTripGeo();
+  if (trip) syncTripDateSpan(trip.id).catch(() => {});
   renderStays(currentStays);
   renderTransport(currentTransport);
   renderVisa(docs || [], trip);
@@ -2569,6 +2570,22 @@ async function tripStillExists() {
   return !!data;
 }
 
+async function syncTripDateSpan(tripId) {
+  const [{ data: stays }, { data: transport }] = await Promise.all([
+    sb.from('stays').select('start_date,end_date').eq('trip_id', tripId),
+    sb.from('transport').select('departure,arrival').eq('trip_id', tripId),
+  ]);
+  const dates = [];
+  (stays || []).forEach(s => { if (s.start_date) dates.push(s.start_date.slice(0, 10)); if (s.end_date) dates.push(s.end_date.slice(0, 10)); });
+  (transport || []).forEach(t => { if (t.departure) dates.push(t.departure.slice(0, 10)); if (t.arrival) dates.push(t.arrival.slice(0, 10)); });
+  if (!dates.length) return;
+  const start_date = dates.reduce((a, b) => (b < a ? b : a));
+  const end_date = dates.reduce((a, b) => (b > a ? b : a));
+  const { error } = await sb.from('trips').update({ start_date, end_date }).eq('id', tripId);
+  if (error) throw error;
+  if (currentTrip && currentTrip.id === tripId) Object.assign(currentTrip, { start_date, end_date });
+}
+
 function stayForm(row) {
   const editing = !!row;
   const values = row
@@ -2579,13 +2596,14 @@ function stayForm(row) {
     values,
     attach: { table: 'stays', folder: currentTrip.id, rowId: row?.id, kind: 'stay', defaultKeep: false },
     onSave: async (d) => {
-      if (editing) { const { error } = await sb.from('stays').update(d).eq('id', row.id); if (error) throw error; Object.assign(row, d); resolveStayGeo(row); return row; }
+      if (editing) { const { error } = await sb.from('stays').update(d).eq('id', row.id); if (error) throw error; Object.assign(row, d); resolveStayGeo(row); await syncTripDateSpan(currentTrip.id); return row; }
       const { data, error } = await sb.from('stays').insert({ ...d, trip_id: currentTrip.id }).select().single();
-      if (error) throw error; resolveStayGeo(data); return data;
+      if (error) throw error; resolveStayGeo(data); await syncTripDateSpan(currentTrip.id); return data;
     },
     onDelete: editing ? async () => {
       const _p = row.attachment_paths || (row.attachment_path ? [row.attachment_path] : []); if (_p.length) await sb.storage.from("tickets").remove(_p);
       const { error } = await sb.from('stays').delete().eq('id', row.id); if (error) throw error;
+      await syncTripDateSpan(currentTrip.id);
     } : null,
     after: () => openTrip(currentTrip.id),
   });
@@ -2597,13 +2615,14 @@ function transportForm(row) {
     values: row || { type: 'flight', currency: currentTrip?.base_currency || 'EUR' },
     attach: { table: 'transport', folder: currentTrip.id, rowId: row?.id, kind: 'transport', defaultKeep: true },
     onSave: async (d) => {
-      if (editing) { const { error } = await sb.from('transport').update(d).eq('id', row.id); if (error) throw error; Object.assign(row, d); resolveTransportGeo(row); return row; }
+      if (editing) { const { error } = await sb.from('transport').update(d).eq('id', row.id); if (error) throw error; Object.assign(row, d); resolveTransportGeo(row); await syncTripDateSpan(currentTrip.id); return row; }
       const { data, error } = await sb.from('transport').insert({ ...d, trip_id: currentTrip.id }).select().single();
-      if (error) throw error; resolveTransportGeo(data); return data;
+      if (error) throw error; resolveTransportGeo(data); await syncTripDateSpan(currentTrip.id); return data;
     },
     onDelete: editing ? async () => {
       const _p = row.attachment_paths || (row.attachment_path ? [row.attachment_path] : []); if (_p.length) await sb.storage.from("tickets").remove(_p);
       const { error } = await sb.from('transport').delete().eq('id', row.id); if (error) throw error;
+      await syncTripDateSpan(currentTrip.id);
     } : null,
     after: () => openTrip(currentTrip.id),
   });
