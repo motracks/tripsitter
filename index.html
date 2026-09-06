@@ -1124,11 +1124,14 @@ async function loadProfile() {
   return currentProfile;
 }
 
-// Route after auth: onboarding if no profile / not onboarded, else overview.
+// Route after auth: onboarding if no profile / not onboarded, else back to
+// whichever trip (or the overview) was open last time.
 async function routeAfterAuth() {
   try {
     const p = await loadProfile();
-    if (!p || !p.onboarded_at) openOnboarding();
+    if (!p || !p.onboarded_at) { openOnboarding(); return; }
+    const last = loadLastView();
+    if (last?.view === 'trip' && last.tripId) await openTrip(last.tripId);
     else await routeToOverview();
   } catch (err) {
     console.error('routeAfterAuth:', err);
@@ -1275,7 +1278,14 @@ try { collapsedSections = new Set(JSON.parse(localStorage.getItem('ts_collapsed'
 
 let overviewTrips = [], overviewCharges = {}, overviewCurrent = {};
 
+// Remembers the last view (overview, or a specific trip) across reloads,
+// so reopening the app returns you to where you left off instead of always
+// dropping back to the trips overview.
+function saveLastView(v) { try { localStorage.setItem('ts_last_view', JSON.stringify(v)); } catch {} }
+function loadLastView() { try { return JSON.parse(localStorage.getItem('ts_last_view') || 'null'); } catch { return null; } }
+
 async function routeToOverview() {
+  saveLastView({ view: 'overview' });
   show('overview');
   const list = $('trips-list');
   list.innerHTML = '<p class="empty-note">loading…</p>';
@@ -1424,6 +1434,8 @@ async function openTrip(tripId) {
     sb.from('transport').select('*').eq('trip_id', tripId).order('departure', { ascending: true }),
     sb.auth.getUser(),
   ]);
+  if (!trip) { routeToOverview(); return; }
+  saveLastView({ view: 'trip', tripId });
   const { data: docs } = await sb.from('travel_docs').select('*').eq('user_id', user.user.id);
 
   // Set base currency if the trip has none yet.
