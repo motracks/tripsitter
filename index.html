@@ -1759,7 +1759,7 @@ window.setTransportCurrency = (cur, id) =>
   setRowCurrency('transport', id, currentTransport, () => renderTransport(currentTransport), cur);
 
 // ---------- visa ----------
-let visaData = null, visaMeta = null;
+let visaData = null, visaMeta = null, arrivalFormsData = null;
 async function loadVisaData() {
   if (visaData) return visaData;
   const grab = async (url, ms) => {
@@ -1780,6 +1780,19 @@ async function loadVisaData() {
   visaMeta = m;
   return visaData;
 }
+
+// Pre-arrival immigration/customs forms (e.g. Thailand's TDAC, India's
+// Atithi customs declaration) — the "fill this out before the airport
+// queue" forms, distinct from visas. Hand-curated, incomplete by design.
+async function loadArrivalForms() {
+  if (arrivalFormsData) return arrivalFormsData;
+  try {
+    const r = await fetch('/data/arrival-forms.json');
+    arrivalFormsData = r.ok ? await r.json() : {};
+  } catch { arrivalFormsData = {}; }
+  return arrivalFormsData;
+}
+function arrivalFormsFor(cc) { return arrivalFormsData?.[cc] || null; }
 
 // Rank: lower = more favourable.
 const VISA_RANK = { 'visa free': 0, 'visa on arrival': 1, 'eta': 2, 'e-visa': 3, 'visa required': 4, 'no admission': 5 };
@@ -2202,6 +2215,7 @@ function renderTransport(transport) {
 
 async function renderVisa(docs, trip) {
   await loadVisaData();
+  await loadArrivalForms();
   const el = $('visa-list');
   const ccs = trip?.country_codes || [];
   const cits = (currentProfile?.citizenships || []).filter(Boolean);
@@ -2274,6 +2288,19 @@ async function renderVisa(docs, trip) {
         const passportNote = v.passport && v.passport !== primary
           ? `<div class="vb-line">Best on your ${flagEmoji(v.passport)} ${esc(COUNTRY_NAME[v.passport])} passport.</div>` : '';
 
+        // Arrival/customs/immigration forms — the stuff you'd otherwise fill
+        // out standing in line (Thailand's TDAC, India's customs app, etc.).
+        // Separate from the visa itself: shown regardless of visa status.
+        const forms = arrivalFormsFor(cc);
+        const formsBlock = forms?.length ? `<div class="vb-line" style="margin-top:8px;padding-top:8px;border-top:0.5px solid var(--border)">
+          <span class="section-label" style="margin:0">Fill out before you fly</span>
+          ${forms.map(f => `<div class="vb-line" style="margin-top:6px">
+            <a href="${f.url}" target="_blank" rel="noopener">${esc(f.name)} ↗</a>
+            <span style="color:var(--muted)"> — ${f.mandatory ? 'required' : 'only if you have something to declare'}, ${esc(f.window)}</span>
+            ${f.notes ? `<div style="color:var(--muted);font-size:12px;margin-top:2px">${esc(f.notes)}</div>` : ''}
+          </div>`).join('')}
+        </div>` : '';
+
         // The matching document, surfaced right here instead of making you
         // go find it in Your documents below — everything for this country
         // in one place.
@@ -2302,6 +2329,7 @@ async function renderVisa(docs, trip) {
           ${passportNote}
           ${bar}
           ${annualBar}
+          ${formsBlock}
           <div class="ic-details">
             ${docSummary}
             ${explain ? `<div class="vb-line">${esc(explain.how)}</div>` : ''}
