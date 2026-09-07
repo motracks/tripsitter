@@ -1,51 +1,55 @@
 {
-  "_comment": "Pre-arrival immigration/customs forms per destination, keyed by ISO-2 country code. Hand-curated and verified against official government sites — incomplete by design, like data/passport-index.json's VISA_PORTAL. window = how long before arrival it can/must be submitted. mandatory = false means it's only required if you have something to declare, or optional-but-recommended for faster clearance.",
+  "_comment": "Pre-arrival immigration/customs forms per destination, keyed by ISO-2 country code. Hand-curated and verified against official government sites — incomplete by design, like data/passport-index.json's VISA_PORTAL. id is a stable per-country key (never reuse or renumber — the app stores completion against it). window = how long before arrival (or before the given direction's flight) it can/must be submitted. mandatory = false means it's only required if you have something to declare, or optional-but-recommended for faster clearance. direction = 'arrival' (default, omitted) or 'departure' for countries (e.g. Colombia) that require a separate filing on the way out too.",
   "TH": [
-    { "name": "Thailand Digital Arrival Card (TDAC)", "url": "https://tdac.immigration.go.th/", "mandatory": true, "window": "within 72 hours before arrival", "notes": "Replaced the paper TM6 card in May 2025. Single entry only — resubmit each time you cross the border. Watch for fake lookalike sites that charge a fee; the real one is free." }
+    { "id": "tdac", "name": "Thailand Digital Arrival Card (TDAC)", "url": "https://tdac.immigration.go.th/", "mandatory": true, "window": "within 72 hours before arrival", "notes": "Replaced the paper TM6 card in May 2025. Single entry only — resubmit each time you cross the border. Watch for fake lookalike sites that charge a fee; the real one is free." }
   ],
   "MY": [
-    { "name": "Malaysia Digital Arrival Card (MDAC)", "url": "https://imigresen-online.imi.gov.my/mdac/main", "mandatory": true, "window": "within 3 days before arrival", "notes": "Mandatory for most foreign visitors since Jan 2024. Free — ignore third-party sites charging up to $80." }
+    { "id": "mdac", "name": "Malaysia Digital Arrival Card (MDAC)", "url": "https://imigresen-online.imi.gov.my/mdac/main", "mandatory": true, "window": "within 3 days before arrival", "notes": "Mandatory for most foreign visitors since Jan 2024. Free — ignore third-party sites charging up to $80." }
   ],
   "SG": [
-    { "name": "SG Arrival Card (SGAC)", "url": "https://eservices.ica.gov.sg/sgarrivalcard/", "mandatory": true, "window": "within 3 days before arrival (incl. day of arrival)", "notes": "Also available via the MyICA app. Free." }
+    { "id": "sgac", "name": "SG Arrival Card (SGAC)", "url": "https://eservices.ica.gov.sg/sgarrivalcard/", "mandatory": true, "window": "within 3 days before arrival (incl. day of arrival)", "notes": "Also available via the MyICA app. Free." }
   ],
   "PH": [
-    { "name": "Philippines eTravel", "url": "https://etravel.gov.ph/", "mandatory": true, "window": "within 72 hours before travel", "notes": "Single platform for both arrival and departure, covers customs, health and immigration data. Free, ~10 minutes." }
+    { "id": "etravel", "name": "Philippines eTravel", "url": "https://etravel.gov.ph/", "mandatory": true, "window": "within 72 hours before travel", "notes": "Single platform for both arrival and departure, covers customs, health and immigration data. Free, ~10 minutes." }
   ],
   "NZ": [
-    { "name": "New Zealand Traveller Declaration (NZTD)", "url": "https://www.travellerdeclaration.govt.nz/", "mandatory": true, "window": "up to 24 hours before arrival", "notes": "Combines customs, immigration and biosecurity declarations. Required even for NZ passport holders. Free." }
+    { "id": "nztd", "name": "New Zealand Traveller Declaration (NZTD)", "url": "https://www.travellerdeclaration.govt.nz/", "mandatory": true, "window": "up to 24 hours before arrival", "notes": "Combines customs, immigration and biosecurity declarations. Required even for NZ passport holders. Free." }
   ],
   "IN": [
-    { "name": "Indian Customs Declaration (Atithi app)", "url": "https://atithi.cbic.gov.in/", "mandatory": false, "window": "in advance of arrival, via app or web", "notes": "Only needed if you're carrying dutiable goods, high-value items, or currency above the declarable limit — lets you pre-file and use the red channel faster." }
+    { "id": "atithi", "name": "Indian Customs Declaration (Atithi app)", "url": "https://atithi.cbic.gov.in/", "mandatory": false, "window": "in advance of arrival, via app or web", "notes": "Only needed if you're carrying dutiable goods, high-value items, or currency above the declarable limit — lets you pre-file and use the red channel faster." }
   ],
   "ID": [
-    { "name": "Indonesia Electronic Customs Declaration (e-CD)", "url": "https://ecd.beacukai.go.id/", "mandatory": true, "window": "within 72 hours before arrival", "notes": "Mandatory for all international arrivals; produces a QR code for customs." }
+    { "id": "ecd", "name": "Indonesia Electronic Customs Declaration (e-CD)", "url": "https://ecd.beacukai.go.id/", "mandatory": true, "window": "within 72 hours before arrival", "notes": "Mandatory for all international arrivals; produces a QR code for customs." }
   ],
   "JP": [
-    { "name": "Visit Japan Web", "url": "https://vjw.digital.go.jp/", "mandatory": false, "window": "any time before arrival", "notes": "Not strictly required (paper forms still accepted) but combines immigration (disembarkation card), customs declaration and quarantine into one QR code, saving significant airport time." }
+    { "id": "vjw", "name": "Visit Japan Web", "url": "https://vjw.digital.go.jp/", "mandatory": false, "window": "any time before arrival", "notes": "Not strictly required (paper forms still accepted) but combines immigration (disembarkation card), customs declaration and quarantine into one QR code, saving significant airport time." }
   ],
   "MV": [
-    { "name": "Maldives Traveller Declaration (IMUGA)", "url": "https://imuga.immigration.gov.mv/traveller", "mandatory": true, "window": "within 96 hours before arrival", "notes": "Required for every foreign arrival. Free — beware paid third-party imitators." }
+    { "id": "imuga", "name": "Maldives Traveller Declaration (IMUGA)", "url": "https://imuga.immigration.gov.mv/traveller", "mandatory": true, "window": "within 96 hours before arrival", "notes": "Required for every foreign arrival. Free — beware paid third-party imitators." }
   ],
   "TW": [
-    { "name": "Taiwan Arrival Card (TWAC)", "url": "https://twac.immigration.gov.tw/", "mandatory": true, "window": "within 3 days before arrival", "notes": "Replaced all paper arrival cards from Oct 1, 2025. Free; a confirmation email is sent on submission." }
+    { "id": "twac", "name": "Taiwan Arrival Card (TWAC)", "url": "https://twac.immigration.gov.tw/", "mandatory": true, "window": "within 3 days before arrival", "notes": "Replaced all paper arrival cards from Oct 1, 2025. Free; a confirmation email is sent on submission." }
   ],
   "MX": [
-    { "name": "Forma Migratoria Múltiple (FMM)", "url": "https://www.inm.gob.mx/fmme/publico/en/solicitud.html", "mandatory": true, "window": "before travel", "notes": "Tourist card issued by Mexico's immigration institute (INM); required for most visitors arriving by air or land." }
+    { "id": "fmm", "name": "Forma Migratoria Múltiple (FMM)", "url": "https://www.inm.gob.mx/fmme/publico/en/solicitud.html", "mandatory": true, "window": "before travel", "notes": "Tourist card issued by Mexico's immigration institute (INM); required for most visitors arriving by air or land." }
   ],
   "BR": [
-    { "name": "e-DBV (Declaração de Bens de Viajante)", "url": "https://www.gov.br/receitafederal/pt-br/assuntos/aduana-e-comercio-exterior/viagens-internacionais/guia-do-viajante/e-dbv", "mandatory": false, "window": "up to 30 days before arrival", "notes": "Only required if carrying goods to declare — high-value items, electronics for resale, or cash over the legal limit." }
+    { "id": "edbv", "name": "e-DBV (Declaração de Bens de Viajante)", "url": "https://www.gov.br/receitafederal/pt-br/assuntos/aduana-e-comercio-exterior/viagens-internacionais/guia-do-viajante/e-dbv", "mandatory": false, "window": "up to 30 days before arrival", "notes": "Only required if carrying goods to declare — high-value items, electronics for resale, or cash over the legal limit." }
   ],
   "CL": [
-    { "name": "Chile Customs Affidavit (Declaración Jurada / SAG)", "url": "https://www.aduana.cl/", "mandatory": true, "window": "from 48 hours before arrival", "notes": "Declares food, plant/animal products, and currency over US$10,000. Presented to a SAG officer on arrival." }
+    { "id": "sag-affidavit", "name": "Chile Customs Affidavit (Declaración Jurada / SAG)", "url": "https://www.aduana.cl/", "mandatory": true, "window": "from 48 hours before arrival", "notes": "Declares food, plant/animal products, and currency over US$10,000. Presented to a SAG officer on arrival." }
   ],
   "AU": [
-    { "name": "Australia Travel Declaration (ATD)", "url": "https://www.abf.gov.au/entering-and-leaving-australia/incoming-passenger-card", "mandatory": true, "window": "up to 72 hours before your flight", "notes": "Digital replacement for the paper Incoming Passenger Card, rolling out airport-by-airport through 2026–2028 — check whether your arrival airport has switched over; the paper card is still used everywhere else." }
+    { "id": "atd", "name": "Australia Travel Declaration (ATD)", "url": "https://www.abf.gov.au/entering-and-leaving-australia/incoming-passenger-card", "mandatory": true, "window": "up to 72 hours before your flight", "notes": "Digital replacement for the paper Incoming Passenger Card, rolling out airport-by-airport through 2026–2028 — check whether your arrival airport has switched over; the paper card is still used everywhere else." }
   ],
   "CU": [
-    { "name": "D'Viajeros", "url": "https://www.dviajeros.mitrans.gob.cu/inicio", "mandatory": true, "window": "from 7 days up to 48 hours before arrival", "notes": "Single digital form replacing Cuba's old embarkation/disembarkation card, customs declaration and health affidavit. Available in English." }
+    { "id": "dviajeros", "name": "D'Viajeros", "url": "https://www.dviajeros.mitrans.gob.cu/inicio", "mandatory": true, "window": "from 7 days up to 48 hours before arrival", "notes": "Single digital form replacing Cuba's old embarkation/disembarkation card, customs declaration and health affidavit. Available in English." }
   ],
   "KR": [
-    { "name": "Korea e-Arrival Card", "url": "https://www.e-arrivalcard.go.kr/", "mandatory": true, "window": "up to 3 days before arrival", "notes": "Required for short-term foreign visitors. Customs declaration is only needed on top of this if you have goods to declare." }
+    { "id": "e-arrival", "name": "Korea e-Arrival Card", "url": "https://www.e-arrivalcard.go.kr/", "mandatory": true, "window": "up to 3 days before arrival", "notes": "Required for short-term foreign visitors. Customs declaration is only needed on top of this if you have goods to declare." }
+  ],
+  "CO": [
+    { "id": "checkmig-in", "name": "Check-Mig (entry)", "url": "https://apps.migracioncolombia.gov.co/pre-registro/public/", "mandatory": false, "direction": "arrival", "window": "from 72 hours until 1 hour before your flight", "notes": "Not technically mandatory but recommended by Migración Colombia to speed up the immigration interview. Free — only use the official .gov.co site." },
+    { "id": "checkmig-out", "name": "Check-Mig (exit)", "url": "https://apps.migracioncolombia.gov.co/pre-registro/public/", "mandatory": false, "direction": "departure", "window": "from 72 hours until 1 hour before your flight", "notes": "A separate submission is required for your departure — the arrival form doesn't cover it. Same portal, same window before your outbound flight." }
   ]
 }

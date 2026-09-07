@@ -2291,14 +2291,32 @@ async function renderVisa(docs, trip) {
         // Arrival/customs/immigration forms — the stuff you'd otherwise fill
         // out standing in line (Thailand's TDAC, India's customs app, etc.).
         // Separate from the visa itself: shown regardless of visa status.
+        // Each form's completion is tracked as its own travel_docs row,
+        // scoped to this trip via trip_id + form_key — so a later trip to
+        // the same country starts unchecked again, and checking one off
+        // creates a real document you can attach a QR code / screenshot to,
+        // which then also shows up in "Your documents" below.
         const forms = arrivalFormsFor(cc);
         const formsBlock = forms?.length ? `<div class="vb-line" style="margin-top:8px;padding-top:8px;border-top:0.5px solid var(--border)">
           <span class="section-label" style="margin:0">Fill out before you fly</span>
-          ${forms.map(f => `<div class="vb-line" style="margin-top:6px">
-            <a href="${f.url}" target="_blank" rel="noopener">${esc(f.name)} ↗</a>
-            <span style="color:var(--muted)"> — ${f.mandatory ? 'required' : 'only if you have something to declare'}, ${esc(f.window)}</span>
-            ${f.notes ? `<div style="color:var(--muted);font-size:12px;margin-top:2px">${esc(f.notes)}</div>` : ''}
-          </div>`).join('')}
+          ${forms.map(f => {
+            const doc = currentDocs.find(d => d.doc_type === 'Entry Form' && d.trip_id === trip?.id && d.form_key === f.id);
+            const done = doc?.status === 'Completed';
+            return `<div class="vb-line" style="margin-top:6px" onclick="event.stopPropagation()">
+              <label style="display:flex;align-items:flex-start;gap:6px;cursor:pointer">
+                <input type="checkbox" style="margin-top:3px" ${done ? 'checked' : ''} onchange="toggleArrivalForm('${cc}','${f.id}',this.checked)">
+                <span>
+                  <a href="${f.url}" target="_blank" rel="noopener" onclick="event.stopPropagation()">${esc(f.name)} ↗</a>${f.direction === 'departure' ? ' <span style="color:var(--muted)">(on your way out)</span>' : ''}
+                  <span style="color:var(--muted)"> — ${f.mandatory ? 'required' : 'recommended'}, ${esc(f.window)}</span>
+                  ${f.notes ? `<div style="color:var(--muted);font-size:12px;margin-top:2px">${esc(f.notes)}</div>` : ''}
+                  ${doc ? `<div style="margin-top:4px">
+                    <button type="button" class="btn btn-ghost btn-sm" onclick="editDoc('${doc.id}')">${doc.attachment_paths?.length || doc.attachment_path ? 'edit / view QR code' : 'add confirmation code or QR code'}</button>
+                  </div>
+                  ${attachmentRow(doc)}` : ''}
+                </span>
+              </label>
+            </div>`;
+          }).join('')}
         </div>` : '';
 
         // The matching document, surfaced right here instead of making you
@@ -2367,10 +2385,13 @@ async function renderVisa(docs, trip) {
     : '';
 
   // ── Your documents (existing travel_docs CRUD) ─────────────
+  // Entry Form docs are trip-specific (a fresh Check-Mig/TDAC each trip) —
+  // hide another trip's copy so it doesn't look like a stale leftover here.
+  // ESTA/Visa/Passport/etc keep trip_id null and always show everywhere.
   // Relevance first: documents matching one of this trip's tagged countries
   // float to the top (in the order those countries are tagged), then
   // everything else keeps its original order.
-  const sortedDocs = docs.slice().sort((a, b) => {
+  const sortedDocs = docs.filter(d => !d.trip_id || d.trip_id === trip?.id).sort((a, b) => {
     const rank = (d) => { const i = ccs.findIndex(cc => countryMatches(d.country, cc)); return i === -1 ? ccs.length : i; };
     return rank(a) - rank(b);
   });
@@ -2393,12 +2414,15 @@ async function renderVisa(docs, trip) {
       d.doc_type === 'Visa' && d.max_stay_days != null && `<div class="detail-row"><span class="detail-label">Allowed stay</span><span class="detail-value">${esc(d.max_stay_days)} days</span></div>`,
       d.doc_type === 'Visa' && d.annual_cap_days != null && `<div class="detail-row"><span class="detail-label">Per calendar year</span><span class="detail-value">${esc(d.annual_cap_days)} days</span></div>`,
       d.doc_type === 'ESTA' && days != null && `<div class="detail-row"><span class="detail-label">This trip</span><span class="detail-value">${days} days used</span></div>`,
-      d.notes && `<div class="detail-row"><span class="detail-label">Notes</span><span class="detail-value">${esc(d.notes)}</span></div>`,
+      d.doc_type !== 'Entry Form' && d.notes && `<div class="detail-row"><span class="detail-label">Notes</span><span class="detail-value">${esc(d.notes)}</span></div>`,
       attachmentRow(d),
     ].filter(Boolean).join('');
+    // An Entry Form's real name lives in `notes` (e.g. "Check-Mig (entry)")
+    // — "Entry Form" alone doesn't distinguish which one.
+    const title = d.doc_type === 'Entry Form' && d.notes ? d.notes : (d.doc_type || 'Document');
     return `<div class="info-card" onclick="toggleCard(this)">
       <div class="ic-header">
-        <div><div class="ic-city">${esc(d.doc_type || 'Document')}</div><div class="ic-dates">${esc(d.country || '')}</div></div>
+        <div><div class="ic-city">${esc(title)}</div><div class="ic-dates">${esc(d.country || '')}</div></div>
         <span class="ic-tag"${passportWarn ? ` style="background:${passportWarn.tone}"` : ''}>${passportWarn ? '⚠ ' : ''}${esc(d.status || '')}</span>
       </div>
       <div class="ic-details">${rows}
@@ -2919,7 +2943,7 @@ const TRANSPORT_FIELDS = [
   { key: 'notes', label: 'Notes', type: 'textarea' },
 ];
 const DOC_FIELDS = [
-  { key: 'doc_type', label: 'Type', type: 'select', options: ['ESTA', 'Visa', 'Global Entry', 'Passport', 'Vaccination', 'Insurance', 'other'] },
+  { key: 'doc_type', label: 'Type', type: 'select', options: ['ESTA', 'Visa', 'Global Entry', 'Passport', 'Vaccination', 'Insurance', 'Entry Form', 'other'] },
   { key: 'country', label: 'Country', type: 'text' },
   { key: 'status', label: 'Status', type: 'text' },
   { key: 'max_stay_days', label: 'Allowed stay (days) — overrides the visa-free limit on the entry tab', type: 'number', showIf: { field: 'doc_type', in: ['Visa'] } },
@@ -3026,6 +3050,33 @@ window.stayForm = stayForm; window.transportForm = transportForm; window.docForm
 window.editStay = (id) => stayForm(currentStays.find(x => x.id === id));
 window.editTransport = (id) => transportForm(currentTransport.find(x => x.id === id));
 window.editDoc = (id) => docForm(currentDocs.find(x => x.id === id));
+
+// Checking off a pre-arrival/departure form (see the "Fill out before you
+// fly" block in renderVisa) creates or updates a travel_docs row scoped to
+// this trip + that form's stable id, so it also appears in "Your documents"
+// and can have a QR code / confirmation number attached via editDoc.
+async function toggleArrivalForm(cc, formId, checked) {
+  const trip = currentTrip;
+  const form = (arrivalFormsFor(cc) || []).find(f => f.id === formId);
+  if (!trip || !form) return;
+  const existing = currentDocs.find(d => d.doc_type === 'Entry Form' && d.trip_id === trip.id && d.form_key === formId);
+  if (existing) {
+    const status = checked ? 'Completed' : 'Pending';
+    const { error } = await sb.from('travel_docs').update({ status }).eq('id', existing.id);
+    if (error) throw error;
+    existing.status = status;
+  } else if (checked) {
+    const { data: { user } } = await sb.auth.getUser();
+    const { data, error } = await sb.from('travel_docs').insert({
+      user_id: user.id, trip_id: trip.id, doc_type: 'Entry Form', country: cc,
+      form_key: formId, notes: form.name, status: 'Completed',
+    }).select().single();
+    if (error) throw error;
+    currentDocs.push(data);
+  }
+  renderVisa(currentDocs, trip);
+}
+window.toggleArrivalForm = toggleArrivalForm;
 
 // ---------- boot ----------
 $('new-trip-btn').addEventListener('click', newTrip);
