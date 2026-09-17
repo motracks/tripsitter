@@ -91,6 +91,14 @@ alter table travel_docs add column if not exists max_stay_days integer;
 -- for the given year (see annualCapStatus() in index.html).
 alter table travel_docs add column if not exists annual_cap_days integer;
 
+-- Cost of the document itself (visa fee, ESTA fee, etc.) — rolled into a
+-- trip's total when the doc's country matches one of the trip's destinations
+-- (see tripDocs() / convertAndSum() in index.html).
+alter table travel_docs add column if not exists price numeric;
+alter table travel_docs add column if not exists currency text default 'EUR';
+alter table travel_docs add column if not exists amount_base numeric;
+alter table travel_docs add column if not exists base_rate_date date;
+
 -- Attachments (ticket / QR / doc scans) live in the private `tickets`
 -- storage bucket; the row holds the object paths only. attachment_paths is
 -- the current column (multiple images); attachment_path is the legacy
