@@ -69,6 +69,41 @@ alter table transport add column if not exists dest_lat double precision;
 alter table transport add column if not exists dest_lng double precision;
 alter table transport add column if not exists geo_source text;  -- 'iata' | 'station' | 'city' | 'manual' | 'partial' | null
 
+-- Daily activities — hikes, tours, classes, events: things you do on a day
+-- of the trip that are neither getting somewhere (transport) nor where you
+-- sleep (stays).
+create table if not exists activities (
+  id           uuid primary key default gen_random_uuid(),
+  trip_id      uuid references trips(id) on delete cascade,
+  type         text,                        -- hike, tour, sightseeing, class, event, wellness, other
+  title        text,
+  location     text,
+  start_at     timestamptz,
+  end_at       timestamptz,
+  organiser    text,
+  booking_code text,
+  price        numeric,   -- original amount in `currency`
+  currency     text default 'EUR',
+  amount_base    numeric, -- price converted into the trip's base_currency (cached)
+  base_rate_date date,
+  notes        text,
+  attachment_paths text[] default '{}',
+  created_at   timestamptz default now()
+);
+
+-- User-created type tags ("+ new tag…" under Other in the Type select) —
+-- each belongs to one category and is offered in that category's form from
+-- then on. Personal to the user, and permanent: there is deliberately no
+-- update/delete policy.
+create table if not exists custom_tags (
+  id         uuid primary key default gen_random_uuid(),
+  user_id    uuid not null default auth.uid() references auth.users on delete cascade,
+  category   text not null check (category in ('transport', 'stay', 'activity')),
+  value      text not null check (length(btrim(value)) between 1 and 40),
+  created_at timestamptz default now()
+);
+create unique index if not exists custom_tags_unique on custom_tags (user_id, category, lower(value));
+
 create table if not exists travel_docs (
   id               uuid primary key default gen_random_uuid(),
   user_id          uuid not null references auth.users,
@@ -161,12 +196,14 @@ begin
 end $$ language plpgsql stable security definer;
 
 -- ---------------------------------------------------------------------------
--- Row Level Security — trips/stays/transport gated on trip membership,
+-- Row Level Security — trips/stays/transport/activities gated on trip membership,
 -- travel_docs personal to the user
 -- ---------------------------------------------------------------------------
 
 alter table trips        enable row level security;
 alter table stays        enable row level security;
+alter table activities   enable row level security;
+alter table custom_tags  enable row level security;
 alter table transport    enable row level security;
 alter table travel_docs  enable row level security;
 alter table trip_members enable row level security;
@@ -178,6 +215,9 @@ drop policy if exists "own transport"    on transport;
 drop policy if exists "member trips"     on trips;
 drop policy if exists "member stays"     on stays;
 drop policy if exists "member transport" on transport;
+drop policy if exists "member activities" on activities;
+drop policy if exists "own custom_tags read" on custom_tags;
+drop policy if exists "own custom_tags insert" on custom_tags;
 drop policy if exists "member trip_members" on trip_members;
 
 -- Trips: visible to any member; only the owner may insert/delete, members edit.
@@ -192,6 +232,9 @@ create policy "member stays" on stays
 create policy "member transport" on transport
   for all using (is_trip_member(trip_id)) with check (is_trip_member(trip_id));
 
+create policy "member activities" on activities
+  for all using (is_trip_member(trip_id)) with check (is_trip_member(trip_id));
+
 -- trip_members: a member can see the roster; the trip owner manages it.
 create policy "member trip_members" on trip_members
   for all using (
@@ -199,6 +242,12 @@ create policy "member trip_members" on trip_members
   ) with check (
     auth.uid() = (select user_id from trips where trips.id = trip_members.trip_id)
   );
+
+-- Custom tags: read + create your own; no update/delete (tags are permanent).
+create policy "own custom_tags read" on custom_tags
+  for select using (auth.uid() = user_id);
+create policy "own custom_tags insert" on custom_tags
+  for insert with check (auth.uid() = user_id);
 
 -- Travel docs stay personal to the user (span trips).
 create policy "own travel_docs" on travel_docs

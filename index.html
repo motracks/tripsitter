@@ -24,6 +24,8 @@
     --red-dim: rgba(255,95,87,0.12);
     --blue: #60aaff;
     --blue-dim: rgba(96,170,255,0.10);
+    --violet: #b79cff;
+    --violet-dim: rgba(183,156,255,0.12);
     --r: 10px;
   }
   * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -77,9 +79,14 @@
   .esta-bar.warn { background: var(--amber); }
   .esta-bar.danger { background: var(--red); }
 
-  /* TABS */
-  .tabs { display: flex; gap: 6px; padding: 0 1.25rem; margin-bottom: 1.25rem; }
-  .tab { flex: 1; padding: 9px 0; border-radius: var(--r); border: 0.5px solid var(--border); background: var(--surface); color: var(--muted); font-family: 'Syne', sans-serif; font-size: 12px; font-weight: 500; cursor: pointer; letter-spacing: 0.03em; transition: all 0.15s; text-align: center; }
+  /* TABS — the trip overview gets its own full-width button above the
+     category tabs, so it reads as "home" rather than a fifth category. */
+  .trip-nav { display: flex; flex-direction: column; gap: 6px; padding: 0 1.25rem; margin-bottom: 10px; }
+  .tabs { display: flex; gap: 6px; }
+  .tab.overview-tab { flex: none; width: 100%; display: flex; align-items: center; justify-content: center; gap: 7px; }
+  .tab.overview-tab svg { display: block; }
+  .trip-actions { padding: 0 1.25rem; }
+  .tab { flex: 1; min-width: 0; padding: 9px 2px; border-radius: var(--r); border: 0.5px solid var(--border); background: var(--surface); color: var(--muted); font-family: 'Syne', sans-serif; font-size: 12px; font-weight: 500; cursor: pointer; letter-spacing: 0.03em; transition: all 0.15s; text-align: center; }
   .tab.active { background: var(--surface2); border-color: var(--border2); color: var(--text); }
 
   .panel { display: none; padding: 0 1.25rem; }
@@ -99,6 +106,7 @@
   .tl-dot.bus { border-color: var(--green); background: var(--green-dim); }
   .tl-dot.train { border-color: var(--amber); background: var(--amber-dim); }
   .tl-dot.stay { border-color: var(--faint); background: var(--bg); }
+  .tl-dot.activity { border-color: var(--violet); background: var(--violet-dim); }
 
   .tl-card { flex: 1; background: var(--surface); border: 0.5px solid var(--border); border-radius: var(--r); padding: 12px 14px; cursor: pointer; transition: border-color 0.15s; }
   .tl-card:hover { border-color: var(--border2); }
@@ -110,6 +118,17 @@
   .pill-bus { background: var(--green-dim); color: var(--green); }
   .pill-train { background: var(--amber-dim); color: var(--amber); }
   .pill-stay { background: var(--faint); color: var(--muted); }
+  .pill-activity { background: var(--violet-dim); color: var(--violet); }
+
+  .new-tag-panel { border: 0.5px dashed var(--border2); border-radius: var(--r); padding: 10px; margin: -4px 0 12px; }
+  .new-tag-panel .field { margin-bottom: 8px; }
+  .nt-actions { display: flex; align-items: center; justify-content: flex-end; gap: 6px; }
+  .nt-msg { flex: 1; font-size: 11px; font-family: 'DM Mono', monospace; color: var(--red); }
+
+  /* "Add travel item" chooser */
+  .add-choices { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 12px; }
+  .add-choice { text-align: left; padding: 12px; display: flex; flex-direction: column; gap: 3px; }
+  .add-choice .ac-sub { font-family: 'DM Mono', monospace; font-size: 10px; font-weight: 400; color: var(--muted); }
   .ic-tag.ic-tag-icon { display: inline-flex; align-items: center; justify-content: center; width: 26px; height: 22px; padding: 0; }
   .ic-tag-icon svg { display: block; }
 
@@ -198,7 +217,7 @@
   .btn-ghost { background: none; color: var(--muted); }
   .btn-danger { background: var(--red-dim); color: var(--red); border-color: rgba(255,95,87,0.25); }
   .btn-sm { font-size: 10px; padding: 4px 9px; font-family: 'DM Mono', monospace; font-weight: 400; }
-  .add-row { display: flex; justify-content: flex-end; margin-bottom: 10px; }
+  .add-row { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
   .ov-controls { display: flex; gap: 8px; margin-bottom: 14px; align-items: center; }
   .ov-controls input[type="search"] {
     flex: 1; background: var(--surface); border: 0.5px solid var(--border2); border-radius: var(--r);
@@ -225,7 +244,8 @@
   .field textarea { min-height: 60px; resize: vertical; }
   .field input:focus, .field select:focus, .field textarea:focus { outline: none; border-color: var(--green); }
   .field-2 { display: flex; gap: 10px; }
-  .field-2 > .field { flex: 1; }
+  .field-2 > .field { flex: 1; min-width: 0; }
+  .field-2 > .field input { min-width: 0; width: 100%; }
   .modal-actions { display: flex; gap: 8px; justify-content: space-between; margin-top: 8px; }
   .modal-actions .right { display: flex; gap: 8px; }
   .modal-msg { font-size: 11px; font-family: 'DM Mono', monospace; min-height: 14px; margin-top: 8px; color: var(--red); }
@@ -420,19 +440,22 @@
     </div>
   </header>
 
-  <div class="tabs">
-    <button class="tab active" data-tab="trip">Trip</button>
-    <button class="tab" data-tab="stays">Stays</button>
-    <button class="tab" data-tab="transport">Transport</button>
-    <button class="tab" data-tab="visa">Visa</button>
+  <div class="trip-nav">
+    <button class="tab overview-tab active" data-tab="trip"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11 12 4l9 7"/><path d="M5 10v10h14V10"/></svg>Trip overview</button>
+    <div class="tabs">
+      <button class="tab" data-tab="transport">Transport</button>
+      <button class="tab" data-tab="stays">Stays</button>
+      <button class="tab" data-tab="activities">Activities</button>
+      <button class="tab" data-tab="visa">Visa</button>
+    </div>
+  </div>
+
+  <div class="add-row trip-actions">
+    <button class="btn btn-ghost btn-sm" id="edit-trip-btn">edit trip</button>
+    <button class="btn btn-green btn-sm" id="add-item-btn">+ add travel item</button>
   </div>
 
   <div class="panel active" id="panel-trip">
-    <div class="add-row">
-      <button class="btn btn-ghost btn-sm" id="edit-trip-btn">edit trip</button>
-      <button class="btn btn-green btn-sm" id="add-transport-btn">+ transport</button>
-      <button class="btn btn-green btn-sm" id="add-stay-btn">+ stay</button>
-    </div>
     <div class="current-status hidden" id="trip-current-status"></div>
     <div class="trip-map hidden" id="trip-map">
       <canvas id="trip-map-canvas"></canvas>
@@ -443,21 +466,24 @@
   </div>
 
   <div class="panel" id="panel-stays">
-    <div class="add-row"><button class="btn btn-green btn-sm" id="add-stay-btn-2">+ stay</button></div>
-    <p class="section-label">Accommodations</p>
+    <p class="section-label">Overnight stays</p>
     <div class="card-grid" id="stays-list"></div>
     <div id="stays-total"></div>
   </div>
 
   <div class="panel" id="panel-transport">
-    <div class="add-row"><button class="btn btn-green btn-sm" id="add-transport-btn-2">+ transport</button></div>
     <p class="section-label">Flights &amp; ground</p>
     <div class="card-grid" id="transport-list"></div>
     <div id="transport-total"></div>
   </div>
 
+  <div class="panel" id="panel-activities">
+    <p class="section-label">Daily activities</p>
+    <div class="card-grid" id="activities-list"></div>
+    <div id="activities-total"></div>
+  </div>
+
   <div class="panel" id="panel-visa">
-    <div class="add-row"><button class="btn btn-green btn-sm" id="add-doc-btn">+ document</button></div>
     <p class="section-label">Travel authorizations</p>
     <div class="card-grid" id="visa-list"></div>
     <div id="visa-total"></div>
@@ -1169,10 +1195,11 @@ function tripDocs(docs, ccs) {
 
 // Convert every row, then return base-currency subtotals. A failing FX
 // lookup for one row never blocks the rest or the render.
-async function convertAndSum(stays, transport, baseCurrency, docs = []) {
+async function convertAndSum(stays, transport, baseCurrency, docs = [], activities = []) {
   await Promise.allSettled([
     ...stays.map(r => ensureBase('stays', r, baseCurrency)),
     ...transport.map(r => ensureBase('transport', r, baseCurrency)),
+    ...activities.map(r => ensureBase('activities', r, baseCurrency)),
     ...docs.map(r => ensureBase('travel_docs', r, baseCurrency)),
   ]);
   // amount_base where we have it; else the raw price if it's already in the
@@ -1183,8 +1210,8 @@ async function convertAndSum(stays, transport, baseCurrency, docs = []) {
     return 0;
   };
   const sum = (rows) => rows.reduce((a, r) => a + rowVal(r), 0);
-  const staysTotal = sum(stays), transportTotal = sum(transport), docsTotal = sum(docs);
-  return { staysTotal, transportTotal, docsTotal, total: staysTotal + transportTotal + docsTotal };
+  const staysTotal = sum(stays), transportTotal = sum(transport), docsTotal = sum(docs), activitiesTotal = sum(activities);
+  return { staysTotal, transportTotal, docsTotal, activitiesTotal, total: staysTotal + transportTotal + docsTotal + activitiesTotal };
 }
 window.copyText = function (text, btn) {
   navigator.clipboard.writeText(text).then(() => {
@@ -1406,16 +1433,17 @@ async function routeToOverview() {
   list.innerHTML = '<p class="empty-note">loading…</p>';
   const { data: { user } } = await sb.auth.getUser();
   $('overview-sub').textContent = user?.email || 'travel archive';
-  const [tripsRes, staysRes, transportRes] = await Promise.all([
+  const [tripsRes, staysRes, transportRes, activitiesRes] = await Promise.all([
     sb.from('trips').select('*').order('start_date', { ascending: false }),
     sb.from('stays').select('id, trip_id, city, host_name, notes, price, currency, amount_base, start_date, end_date'),
     sb.from('transport').select('id, trip_id, type, origin, destination, carrier, notes, price, currency, amount_base, departure, arrival'),
+    sb.from('activities').select('id, trip_id, title, location, organiser, notes, price, amount_base'),
   ]);
   const { data: trips, error } = tripsRes;
   if (error) { list.innerHTML = `<p class="empty-note">${esc(error.message)}</p>`; return; }
 
   overviewCharges = {};
-  for (const r of [...(staysRes.data || []), ...(transportRes.data || [])]) {
+  for (const r of [...(staysRes.data || []), ...(transportRes.data || []), ...(activitiesRes.data || [])]) {
     const v = r.amount_base != null ? Number(r.amount_base) : Number(r.price);
     overviewCharges[r.trip_id] = (overviewCharges[r.trip_id] || 0) + (!Number.isNaN(v) ? v : 0);
   }
@@ -1423,6 +1451,7 @@ async function routeToOverview() {
   const bagByTrip = {};
   for (const r of (staysRes.data || [])) bagByTrip[r.trip_id] = (bagByTrip[r.trip_id] || '') + ' ' + [r.city, r.host_name, r.notes].filter(Boolean).join(' ');
   for (const r of (transportRes.data || [])) bagByTrip[r.trip_id] = (bagByTrip[r.trip_id] || '') + ' ' + [r.origin, r.destination, r.carrier, r.notes].filter(Boolean).join(' ');
+  for (const r of (activitiesRes.data || [])) bagByTrip[r.trip_id] = (bagByTrip[r.trip_id] || '') + ' ' + [r.title, r.location, r.organiser, r.notes].filter(Boolean).join(' ');
 
   // what's happening right now, per trip (mid-flight, settled into a stay, ...)
   const staysByTrip = {}, transportByTrip = {};
@@ -1535,7 +1564,8 @@ function guessCurrency(destination) {
   return 'EUR';
 }
 
-let currentTrip = null, currentStays = [], currentTransport = [], currentDocs = [];
+let currentTrip = null, currentStays = [], currentTransport = [], currentActivities = [], currentDocs = [];
+let customTags = [];   // [{ category, value }] — the user's own type tags
 
 async function openTrip(tripId) {
   show('detail');
@@ -1543,10 +1573,15 @@ async function openTrip(tripId) {
   document.querySelectorAll('#detail .panel').forEach((p, i) => p.classList.toggle('active', i === 0));
   invalidateComplianceCache();
 
-  const [{ data: trip }, { data: stays }, { data: transport }, { data: user }] = await Promise.all([
+  const [{ data: trip }, { data: stays }, { data: transport }, { data: activities }, { data: tags }, { data: user }] = await Promise.all([
     sb.from('trips').select('*').eq('id', tripId).single(),
     sb.from('stays').select('*').eq('trip_id', tripId).order('start_date', { ascending: true }),
     sb.from('transport').select('*').eq('trip_id', tripId).order('departure', { ascending: true }),
+    // null (not an error thrown) if the activities table hasn't been
+    // created yet — the trip still renders, just without activities.
+    sb.from('activities').select('*').eq('trip_id', tripId).order('start_at', { ascending: true }),
+    // RLS scopes this to the signed-in user's own tags.
+    sb.from('custom_tags').select('category, value').order('created_at', { ascending: true }),
     sb.auth.getUser(),
   ]);
   if (!trip) { routeToOverview(); return; }
@@ -1562,6 +1597,8 @@ async function openTrip(tripId) {
   currentTrip = trip;
   currentStays = stays || [];
   currentTransport = transport || [];
+  currentActivities = activities || [];
+  customTags = tags || [];
   currentDocs = docs || [];
 
   $('detail-name').textContent = trip?.name || 'Trip';
@@ -1575,11 +1612,12 @@ async function openTrip(tripId) {
   if (currentTransport.some(t => (t.type || '').toLowerCase() === 'flight')) await loadAirports();
 
   renderVisaHeader(trip);
-  renderTimeline(currentStays, currentTransport);
+  renderTimeline(currentStays, currentTransport, currentActivities);
   renderTripMapForCurrentTrip();
   backfillTripGeo();
   renderStays(currentStays);
   renderTransport(currentTransport);
+  renderActivities(currentActivities);
   renderVisa(docs || [], trip);
   refreshTotals();
 }
@@ -1718,12 +1756,13 @@ async function refreshTotals() {
   $('trip-total').innerHTML = `<div class="total-bar"><span class="tb-label">Trip total</span><div class="tb-value">…</div></div>`;
   let c;
   try {
-    c = await convertAndSum(currentStays, currentTransport, base, visaDocs);
+    c = await convertAndSum(currentStays, currentTransport, base, visaDocs, currentActivities);
   } catch (err) {
     // last-ditch: plain sums so the bars always render
     const raw = (rows) => rows.reduce((a, r) => a + (Number(r.amount_base ?? r.price) || 0), 0);
     c = { staysTotal: raw(currentStays), transportTotal: raw(currentTransport), docsTotal: raw(visaDocs),
-          total: raw(currentStays) + raw(currentTransport) + raw(visaDocs) };
+          activitiesTotal: raw(currentActivities),
+          total: raw(currentStays) + raw(currentTransport) + raw(visaDocs) + raw(currentActivities) };
   }
 
   $('transport-total').innerHTML = `<div class="total-bar">
@@ -1734,6 +1773,10 @@ async function refreshTotals() {
     <span class="tb-label">Total stays</span>
     <div class="tb-value">${fmtMoney(c.staysTotal, base)} ${currencyPicker(base, 'setTripCurrency')}</div>
   </div>`;
+  $('activities-total').innerHTML = c.activitiesTotal ? `<div class="total-bar">
+    <span class="tb-label">Total activities</span>
+    <div class="tb-value">${fmtMoney(c.activitiesTotal, base)} ${currencyPicker(base, 'setTripCurrency')}</div>
+  </div>` : '';
   const visaTotalEl = $('visa-total');
   if (visaTotalEl) {
     visaTotalEl.innerHTML = c.docsTotal ? `<div class="total-bar">
@@ -1747,6 +1790,7 @@ async function refreshTotals() {
     <div class="tb-breakdown ic-details">
       <div class="detail-row"><span class="detail-label">Transport</span><span class="detail-value">${fmtMoney(c.transportTotal, base)}</span></div>
       <div class="detail-row"><span class="detail-label">Stays</span><span class="detail-value">${fmtMoney(c.staysTotal, base)}</span></div>
+      ${c.activitiesTotal ? `<div class="detail-row"><span class="detail-label">Activities</span><span class="detail-value">${fmtMoney(c.activitiesTotal, base)}</span></div>` : ''}
       ${c.docsTotal ? `<div class="detail-row"><span class="detail-label">Visas &amp; documents</span><span class="detail-value">${fmtMoney(c.docsTotal, base)}</span></div>` : ''}
       <div class="detail-row"><span class="detail-label">Note</span><span class="detail-value">converted at the rate on each entry's date</span></div>
     </div>
@@ -1774,6 +1818,8 @@ window.setStayCurrency = (cur, id) =>
   setRowCurrency('stays', id, currentStays, () => renderStays(currentStays), cur);
 window.setTransportCurrency = (cur, id) =>
   setRowCurrency('transport', id, currentTransport, () => renderTransport(currentTransport), cur);
+window.setActivityCurrency = (cur, id) =>
+  setRowCurrency('activities', id, currentActivities, () => renderActivities(currentActivities), cur);
 
 // ---------- visa ----------
 let visaData = null, visaMeta = null;
@@ -2044,9 +2090,10 @@ async function renderVisaHeader(trip) {
 const dotClass = (type) => ({ flight: 'flight', bus: 'bus', train: 'train' }[type] || 'stay');
 const pillClass = (type) => ({ flight: 'pill-flight', bus: 'pill-bus', train: 'pill-train' }[type] || 'pill-stay');
 
-function renderTimeline(stays, transport) {
+function renderTimeline(stays, transport, activities = []) {
   const items = [
     ...transport.map(t => ({ kind: 'transport', when: t.departure, data: t })),
+    ...activities.map(a => ({ kind: 'activity', when: a.start_at, data: a })),
     // A stay only has a date, not a time, for when it starts — checking in
     // obviously happens after you arrive. Sort it as the last moment of its
     // start day rather than midnight, so a same-day transport leg (a car
@@ -2085,7 +2132,13 @@ function renderTimeline(stays, transport) {
       }
     }
 
-    if (item.kind === 'transport') {
+    if (item.kind === 'activity') {
+      tl.insertAdjacentHTML('beforeend', `
+        <div class="tl-item" style="animation-delay:${delay}s">
+          <div class="tl-dot-wrap"><div class="tl-dot activity"></div></div>
+          ${activityCardHTML(item.data, 'tl')}
+        </div>`);
+    } else if (item.kind === 'transport') {
       const t = item.data;
       const type = (t.type || '').toLowerCase();
       const rows = [
@@ -2215,6 +2268,50 @@ function renderTransport(transport) {
     </div>`;
   }).join('');
   hydrateAttachments($('transport-list'));
+}
+
+// One card shape for an activity, used both on the timeline ('tl') and in
+// the Activities tab ('ic').
+function activityCardHTML(a, variant) {
+  const when = a.end_at ? `${fmtDT(a.start_at)} – ${fmtDT(a.end_at)}` : fmtDT(a.start_at);
+  const rows = [
+    a.booking_code && `<div class="detail-row"><span class="detail-label">Booking</span><span class="detail-value" style="display:flex;align-items:center;gap:6px">${esc(a.booking_code)} <button class="copy-btn" onclick="event.stopPropagation();copyText('${esc(String(a.booking_code).replace(/\s/g,''))}',this)">copy</button></span></div>`,
+    a.organiser && `<div class="detail-row"><span class="detail-label">Organiser</span><span class="detail-value">${esc(a.organiser)}</span></div>`,
+    variant === 'ic' && `<div class="detail-row"><span class="detail-label">When</span><span class="detail-value">${esc(when)}</span></div>`,
+    variant === 'tl' && a.end_at && `<div class="detail-row"><span class="detail-label">Ends</span><span class="detail-value">${esc(fmtDT(a.end_at))}</span></div>`,
+    a.location && `<div class="detail-row"><span class="detail-label">Where</span><span class="detail-value"><a href="https://maps.google.com/?q=${encodeURIComponent(a.location)}" target="_blank" onclick="event.stopPropagation()">${esc(a.location)} ↗</a></span></div>`,
+    a.price != null && (variant === 'ic'
+      ? `<div class="detail-row"><span class="detail-label">Price</span><span class="detail-value" style="display:flex;align-items:center;gap:8px">${Number(a.price) === 0 ? 'free' : money(Number(a.price))} ${currencyPicker(a.currency || 'EUR', 'setActivityCurrency', a.id)}</span></div>`
+      : `<div class="detail-row"><span class="detail-label">Price</span><span class="detail-value">${Number(a.price) === 0 ? 'free' : fmtMoney(a.price, a.currency)}</span></div>`),
+    a.notes && `<div class="detail-row"><span class="detail-label">Notes</span><span class="detail-value">${esc(a.notes)}</span></div>`,
+    attachmentRow(a),
+  ].filter(Boolean).join('');
+  const actions = `<div class="card-actions"><button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();editActivity('${a.id}')">edit</button></div>`;
+  const title = a.title || a.type || 'activity';
+  if (variant === 'tl') return `
+    <div class="tl-card" onclick="toggleCard(this)">
+      <div class="tl-card-header">
+        <span class="tl-type-pill pill-activity">${esc(a.type || 'activity')}</span>
+        <span class="tl-date">${esc(fmtDT(a.start_at))}</span>
+      </div>
+      <div class="tl-title">${esc(title)}</div>
+      <div class="tl-sub">${esc([a.location, a.organiser].filter(Boolean).join(' · '))}</div>
+      <div class="tl-details">${rows || '<div class="detail-row"><span class="detail-label">No extra detail</span><span class="detail-value"></span></div>'}${actions}</div>
+    </div>`;
+  return `<div class="info-card" onclick="toggleCard(this)">
+    <div class="ic-header">
+      <div><div class="ic-city">${esc(title)}</div><div class="ic-dates">${esc(fmtDT(a.start_at))}${a.location ? ' · ' + esc(a.location) : ''}</div></div>
+      <span class="ic-tag pill-activity">${esc(a.type || 'activity')}</span>
+    </div>
+    <div class="ic-details">${rows}${actions}</div>
+  </div>`;
+}
+
+function renderActivities(activities) {
+  const el = $('activities-list');
+  if (!activities.length) { el.innerHTML = '<p class="empty-note">No activities.</p>'; return; }
+  el.innerHTML = activities.map(a => activityCardHTML(a, 'ic')).join('');
+  hydrateAttachments(el);
 }
 
 async function renderVisa(docs, trip) {
@@ -2593,6 +2690,8 @@ function openForm(opts) {
   $('modal').classList.remove('hidden');
   $('modal').onclick = (e) => { if (e.target === $('modal')) closeModal(); };
   $('modal').querySelectorAll('.tag-input').forEach(wireTagInput);
+  const typeSel = $('modal').querySelector('select[data-key="type"]');
+  if (opts.tagCategory && typeSel) wireNewTag(typeSel, opts.tagCategory);
 
   // Conditional fields: show a [data-showif="field:v1|v2"] only when the
   // referenced field currently holds one of those values.
@@ -2721,9 +2820,9 @@ function openForm(opts) {
       // value is just a default, never user input at this point).
       if (k === 'type' && el.tagName === 'SELECT') {
         const want = normParsedType(String(val).toLowerCase());
-        const opt = [...el.options].find(o =>
+        const opt = [...el.options].find(o => o.value !== NEW_TAG && (
           o.value.toLowerCase() === want || o.text.toLowerCase().includes(want) ||
-          o.value.toLowerCase() === String(val).toLowerCase());
+          o.value.toLowerCase() === String(val).toLowerCase()));
         if (opt) { el.value = opt.value; any = true; el.dispatchEvent(new Event('change')); }
         continue;
       }
@@ -2739,12 +2838,24 @@ function openForm(opts) {
     return any;
   }
 
+  // Arrived here from "add travel item" with an upload that was already
+  // read and sorted into this category — carry the images and fields over.
+  if (opts.preload) {
+    const { files = [], fields } = opts.preload;
+    if (attach && files.length) { newFiles.push(...files); renderGallery(); }
+    if (fields && fillFormFromParsed(fields) && attach) {
+      $('attach-parsenote').classList.remove('hidden');
+      $('attach-parsenote').textContent = 'fields filled — check them before saving';
+    }
+  }
+
   $('modal-form').onsubmit = async (e) => {
     e.preventDefault();
     $('modal-save').disabled = true;
     $('modal-msg').textContent = '';
     try {
       const data = readForm();
+      if (data.type === NEW_TAG) throw new Error('add the new tag first, or pick another type');
       const keep = attach ? !!$('attach-keep')?.checked : false;
       if (attach) {
         data.attachment_paths = keep ? keptPaths.slice() : [];
@@ -2812,7 +2923,7 @@ function shrinkImage(file, max = 1600, quality = 0.82) {
   });
 }
 
-// Send one or more images to the parse endpoint. kind = transport|stay|doc.
+// Send one or more images to the parse endpoint. kind = transport|stay|activity|doc|auto.
 async function parseTicket(files, kind) {
   const list = Array.isArray(files) ? files : [files];
   const images = await Promise.all(list.slice(0, 4).map(f => shrinkImage(f)));
@@ -2908,6 +3019,23 @@ const TRANSPORT_FIELDS = [
   { key: 'currency', label: 'Currency', type: 'currency', half: true },
   { key: 'notes', label: 'Notes', type: 'textarea' },
 ];
+const ACTIVITY_FIELDS = [
+  { key: 'type', label: 'Type', type: 'select', options: [
+    { value: 'hike', label: 'Hike / trek' }, { value: 'tour', label: 'Guided tour' },
+    { value: 'sightseeing', label: 'Sightseeing / entry ticket' }, { value: 'class', label: 'Class / lesson' },
+    { value: 'event', label: 'Event / show' }, { value: 'wellness', label: 'Wellness / spa' },
+    { value: 'other', label: 'Other' },
+  ] },
+  { key: 'title', label: 'What', type: 'text' },
+  { key: 'location', label: 'Where / meeting point', type: 'text' },
+  { key: 'start_at', label: 'Starts', type: 'datetime', half: true },
+  { key: 'end_at', label: 'Ends', type: 'datetime', half: true },
+  { key: 'organiser', label: 'Organiser / guide', type: 'text' },
+  { key: 'booking_code', label: 'Booking code', type: 'text' },
+  { key: 'price', label: 'Price', type: 'number', half: true },
+  { key: 'currency', label: 'Currency', type: 'currency', half: true },
+  { key: 'notes', label: 'Notes', type: 'textarea' },
+];
 const DOC_FIELDS = [
   { key: 'doc_type', label: 'Type', type: 'select', options: ['ESTA', 'Visa', 'Global Entry', 'Passport', 'Vaccination', 'Insurance', 'other'] },
   { key: 'country', label: 'Country', type: 'text' },
@@ -2920,6 +3048,97 @@ const DOC_FIELDS = [
   { key: 'reference_number', label: 'Reference number', type: 'text' },
   { key: 'notes', label: 'Notes', type: 'textarea' },
 ];
+
+// The Type select for a category, with the user's own tags and a
+// "+ new tag…" option added under Other.
+const NEW_TAG = '__new__';
+const TAG_CATEGORIES = [
+  { key: 'transport', label: 'Transport' },
+  { key: 'stay', label: 'Overnight stay' },
+  { key: 'activity', label: 'Daily activity' },
+];
+function withCustomTags(fields, category) {
+  return fields.map(f => {
+    if (f.key !== 'type') return f;
+    const asOpt = (o) => (typeof o === 'object' ? o : { value: o, label: o });
+    let groups = f.groups ? f.groups.map(g => ({ ...g, options: g.options.map(asOpt) }))
+      : [{ label: '', options: f.options.map(asOpt) }];
+    // pull "other" out so it sits with "+ new tag…" at the very end
+    groups = groups.map(g => ({ ...g, options: g.options.filter(o => o.value !== 'other') }))
+      .filter(g => g.options.length);
+    const known = new Set(groups.flatMap(g => g.options.map(o => o.value.toLowerCase())));
+    const own = customTags.filter(t => t.category === category && !known.has(t.value.toLowerCase()))
+      .map(t => ({ value: t.value, label: t.value }));
+    if (own.length) groups.push({ label: 'Your tags', options: own });
+    groups.push({ label: '', options: [{ value: 'other', label: 'Other' }, { value: NEW_TAG, label: '+ new tag…' }] });
+    return { ...f, options: undefined, groups };
+  });
+}
+
+// Inline "new tag" panel under the Type select: name + category. A tag in
+// this form's category is added and selected; one for another category is
+// saved for next time and the select goes back to what it was.
+function wireNewTag(sel, category) {
+  let prev = sel.value === NEW_TAG ? 'other' : sel.value;
+  const panel = document.createElement('div');
+  panel.className = 'new-tag-panel hidden';
+  panel.innerHTML = `
+    <div class="field-2">
+      <div class="field"><label>New tag</label><input type="text" class="nt-name" maxlength="40" placeholder="e.g. rickshaw, ashram, rafting"></div>
+      <div class="field"><label>Category</label><select class="nt-cat">${TAG_CATEGORIES.map(c =>
+        `<option value="${c.key}"${c.key === category ? ' selected' : ''}>${esc(c.label)}</option>`).join('')}</select></div>
+    </div>
+    <div class="nt-actions">
+      <span class="nt-msg"></span>
+      <button type="button" class="btn btn-ghost btn-sm nt-cancel">cancel</button>
+      <button type="button" class="btn btn-green btn-sm nt-add">add tag</button>
+    </div>`;
+  sel.closest('.field').after(panel);
+  const name = panel.querySelector('.nt-name'), cat = panel.querySelector('.nt-cat');
+  const msg = panel.querySelector('.nt-msg'), addBtn = panel.querySelector('.nt-add');
+  const close = () => { panel.classList.add('hidden'); name.value = ''; msg.textContent = ''; };
+  sel.addEventListener('change', () => {
+    if (sel.value === NEW_TAG) { panel.classList.remove('hidden'); cat.value = category; name.focus(); }
+    else { prev = sel.value; close(); }
+  });
+  panel.querySelector('.nt-cancel').onclick = () => { close(); sel.value = prev; sel.dispatchEvent(new Event('change')); };
+  name.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); addBtn.click(); } });
+  addBtn.onclick = async () => {
+    const value = name.value.trim().replace(/\s+/g, ' ');
+    const c = cat.value;
+    if (!value) { msg.textContent = 'give the tag a name'; return; }
+    if (value === NEW_TAG) return;
+    // Already one of this category's options (built-in or own)? Just use it.
+    const existing = c === category && [...sel.options].find(o => o.value.toLowerCase() === value.toLowerCase() && o.value !== NEW_TAG);
+    if (existing) { sel.value = existing.value; sel.dispatchEvent(new Event('change')); return; }
+    if (!customTags.some(t => t.category === c && t.value.toLowerCase() === value.toLowerCase())) {
+      addBtn.disabled = true;
+      const { error } = await sb.from('custom_tags').insert({ category: c, value });
+      addBtn.disabled = false;
+      // 23505 = already saved (e.g. from another device) — fine, use it.
+      if (error && error.code !== '23505') { msg.textContent = error.message; return; }
+      customTags.push({ category: c, value });
+    }
+    if (c === category) {
+      let group = [...sel.querySelectorAll('optgroup')].find(g => g.label === 'Your tags');
+      if (!group) {
+        group = document.createElement('optgroup'); group.label = 'Your tags';
+        sel.insertBefore(group, sel.querySelector(`option[value="other"]`).parentElement);
+      }
+      const o = document.createElement('option'); o.value = value; o.textContent = value;
+      group.appendChild(o);
+      sel.value = value; sel.dispatchEvent(new Event('change'));
+    } else {
+      const label = TAG_CATEGORIES.find(x => x.key === c).label.toLowerCase();
+      sel.value = prev; sel.dispatchEvent(new Event('change'));
+      // close() ran via the change handler; leave a note where the panel was
+      const note = document.createElement('div');
+      note.className = 'parse-note'; note.style.margin = '-4px 0 12px';
+      note.textContent = `“${value}” saved as a ${label} tag — it'll be there when you add a ${label}`;
+      panel.after(note); setTimeout(() => note.remove(), 6000);
+    }
+  };
+}
 
 function newTrip() {
   openForm({
@@ -2942,7 +3161,7 @@ function editTrip() {
     },
     onDelete: async () => {
       // wipe storage objects for this trip, then the row (cascade handles children)
-      const paths = [...currentStays, ...currentTransport].flatMap(r => r.attachment_paths || (r.attachment_path ? [r.attachment_path] : []));
+      const paths = [...currentStays, ...currentTransport, ...currentActivities].flatMap(r => r.attachment_paths || (r.attachment_path ? [r.attachment_path] : []));
       if (paths.length) await sb.storage.from('tickets').remove(paths);
       const { error } = await sb.from('trips').delete().eq('id', currentTrip.id);
       if (error) throw error;
@@ -2955,14 +3174,14 @@ async function tripStillExists() {
   return !!data;
 }
 
-function stayForm(row) {
+function stayForm(row, preload) {
   const editing = !!row;
   const values = row
     ? { ...row, type: normStayType(row.type) }
     : { type: 'housesit', currency: currentTrip?.base_currency || 'EUR' };
   openForm({
-    title: editing ? 'Edit stay' : 'Add stay', fields: STAY_FIELDS,
-    values,
+    title: editing ? 'Edit stay' : 'Add overnight stay', fields: withCustomTags(STAY_FIELDS, 'stay'), tagCategory: 'stay',
+    values, preload,
     attach: { table: 'stays', folder: currentTrip.id, rowId: row?.id, kind: 'stay', defaultKeep: false },
     onSave: async (d) => {
       if (editing) { const { error } = await sb.from('stays').update(d).eq('id', row.id); if (error) throw error; Object.assign(row, d); resolveStayGeo(row); return row; }
@@ -2976,11 +3195,11 @@ function stayForm(row) {
     after: () => openTrip(currentTrip.id),
   });
 }
-function transportForm(row) {
+function transportForm(row, preload) {
   const editing = !!row;
   openForm({
-    title: editing ? 'Edit transport' : 'Add transport', fields: TRANSPORT_FIELDS,
-    values: row || { type: 'flight', currency: currentTrip?.base_currency || 'EUR' },
+    title: editing ? 'Edit transport' : 'Add transport', fields: withCustomTags(TRANSPORT_FIELDS, 'transport'), tagCategory: 'transport',
+    values: row || { type: 'flight', currency: currentTrip?.base_currency || 'EUR' }, preload,
     attach: { table: 'transport', folder: currentTrip.id, rowId: row?.id, kind: 'transport', defaultKeep: true },
     onSave: async (d) => {
       if (editing) { const { error } = await sb.from('transport').update(d).eq('id', row.id); if (error) throw error; Object.assign(row, d); resolveTransportGeo(row); return row; }
@@ -2994,11 +3213,11 @@ function transportForm(row) {
     after: () => openTrip(currentTrip.id),
   });
 }
-function docForm(row) {
+function docForm(row, preload) {
   const editing = !!row;
   openForm({
     title: editing ? 'Edit document' : 'Add document', fields: DOC_FIELDS,
-    values: row || {},
+    values: row || {}, preload,
     attach: { table: 'travel_docs', folder: 'user', rowId: row?.id, kind: 'doc', userFolder: true, defaultKeep: false },
     onSave: async (d) => {
       const { data: { user } } = await sb.auth.getUser();
@@ -3013,20 +3232,87 @@ function docForm(row) {
     after: () => openTrip(currentTrip.id),
   });
 }
-window.stayForm = stayForm; window.transportForm = transportForm; window.docForm = docForm;
+function activityForm(row, preload) {
+  const editing = !!row;
+  openForm({
+    title: editing ? 'Edit activity' : 'Add activity', fields: withCustomTags(ACTIVITY_FIELDS, 'activity'), tagCategory: 'activity',
+    values: row || { type: 'hike', currency: currentTrip?.base_currency || 'EUR' }, preload,
+    attach: { table: 'activities', folder: currentTrip.id, rowId: row?.id, kind: 'activity', defaultKeep: true },
+    onSave: async (d) => {
+      if (editing) { const { error } = await sb.from('activities').update(d).eq('id', row.id); if (error) throw error; Object.assign(row, d); return row; }
+      const { data, error } = await sb.from('activities').insert({ ...d, trip_id: currentTrip.id }).select().single();
+      if (error) throw error; return data;
+    },
+    onDelete: editing ? async () => {
+      const _p = row.attachment_paths || []; if (_p.length) await sb.storage.from("tickets").remove(_p);
+      const { error } = await sb.from('activities').delete().eq('id', row.id); if (error) throw error;
+    } : null,
+    after: () => openTrip(currentTrip.id),
+  });
+}
+
+// "+ add travel item": one entry point for everything. Upload a booking and
+// it's classified and opened in the right form, or pick the category by hand.
+const ADD_CATEGORIES = [
+  { key: 'transport', label: 'Transport', sub: 'flight, train, bus, ride', form: transportForm },
+  { key: 'stay', label: 'Overnight stay', sub: 'hotel, sit, retreat', form: stayForm },
+  { key: 'activity', label: 'Daily activity', sub: 'hike, tour, class, event', form: activityForm },
+  { key: 'doc', label: 'Visa & documents', sub: 'visa, ESTA, insurance', form: docForm },
+];
+function addTravelItem() {
+  let files = [], fields = null;
+  $('modal').innerHTML = `
+    <div class="modal-box">
+      <h2>Add travel item</h2>
+      <div class="mb-sub">upload a ticket or booking and it's sorted for you — or pick a category</div>
+      <div class="field">
+        <div class="attach-box" id="add-upload">upload ticket / booking / screenshot</div>
+        <input type="file" id="add-upload-input" accept="image/*" multiple class="hidden">
+        <div class="parse-note hidden" id="add-note"></div>
+      </div>
+      <div class="add-choices">
+        ${ADD_CATEGORIES.map(c => `<button type="button" class="btn add-choice" data-cat="${c.key}">${esc(c.label)}<span class="ac-sub">${esc(c.sub)}</span></button>`).join('')}
+      </div>
+      <div class="modal-actions"><span></span><div class="right">
+        <button type="button" class="btn btn-ghost btn-sm" onclick="closeModal()">cancel</button>
+      </div></div>
+    </div>`;
+  $('modal').classList.remove('hidden');
+  $('modal').onclick = (e) => { if (e.target === $('modal')) closeModal(); };
+  const open = (key) => {
+    const cat = ADD_CATEGORIES.find(c => c.key === key);
+    cat.form(null, files.length || fields ? { files, fields } : undefined);
+  };
+  $('modal').querySelectorAll('[data-cat]').forEach(b => b.onclick = () => open(b.dataset.cat));
+  $('add-upload').onclick = () => $('add-upload-input').click();
+  $('add-upload-input').onchange = async () => {
+    files = [...$('add-upload-input').files];
+    if (!files.length) return;
+    const note = $('add-note');
+    note.classList.remove('hidden');
+    note.textContent = 'reading image' + (files.length > 1 ? 's' : '') + '…';
+    try {
+      const res = await parseTicket(files.slice(0, 4), 'auto');
+      fields = res.fields;
+      if (res.category) { open(res.category); return; }
+      note.textContent = "couldn't tell what this is — pick a category and it'll be attached";
+    } catch (err) {
+      note.textContent = 'reading failed (' + (err.message || 'error') + ') — pick a category and it\'ll be attached';
+    }
+  };
+}
+
+window.stayForm = stayForm; window.transportForm = transportForm; window.docForm = docForm; window.activityForm = activityForm;
 // Edit handlers called from inline onclick — look the row up here (module scope).
 window.editStay = (id) => stayForm(currentStays.find(x => x.id === id));
 window.editTransport = (id) => transportForm(currentTransport.find(x => x.id === id));
 window.editDoc = (id) => docForm(currentDocs.find(x => x.id === id));
+window.editActivity = (id) => activityForm(currentActivities.find(x => x.id === id));
 
 // ---------- boot ----------
 $('new-trip-btn').addEventListener('click', newTrip);
 $('edit-trip-btn').addEventListener('click', editTrip);
-$('add-stay-btn').addEventListener('click', () => stayForm());
-$('add-stay-btn-2').addEventListener('click', () => stayForm());
-$('add-transport-btn').addEventListener('click', () => transportForm());
-$('add-transport-btn-2').addEventListener('click', () => transportForm());
-$('add-doc-btn').addEventListener('click', () => docForm());
+$('add-item-btn').addEventListener('click', addTravelItem);
 
 // Re-fit the canvas on resize/orientation change while a trip is open.
 let _mapResizeT = null;

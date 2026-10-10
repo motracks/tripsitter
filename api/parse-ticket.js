@@ -53,6 +53,20 @@ Return a JSON object with any of these keys you can determine:
   price: number only — the main cost of the stay / course (no symbol)
   currency: ISO 4217 code
   notes: meal times, what's included/excluded, contacts, room category, etc.`,
+  activity: `${COMMON}
+Return a JSON object with any of these keys you can determine:
+  type: one of "hike" | "tour" | "sightseeing" | "class" | "event" | "wellness" | "other"
+        ("event" = concert, show, match, festival; "class" = cooking class,
+        a single lesson; "wellness" = spa, massage)
+  title: short name of the activity (e.g. "Triund trek", "Taj Mahal sunrise tour")
+  location: where it happens / meeting point, human readable
+  start_at: ISO 8601 datetime (local time as printed; date-only is fine)
+  end_at: ISO 8601 datetime
+  organiser: tour operator / guide / venue name
+  booking_code: booking reference / ticket number
+  price: number only (no currency symbol)
+  currency: ISO 4217 code
+  notes: what to bring, pickup details, contacts, what's included, etc.`,
   doc: `${COMMON}
 Return a JSON object with any of these keys you can determine:
   doc_type: one of "ESTA" | "Visa" | "Global Entry" | "Passport" | "Vaccination" | "Insurance" | "other"
@@ -75,6 +89,26 @@ Return a JSON object with any of these keys you can determine:
         cap. Omit if none is stated.
   notes: anything else useful that the two fields above didn't capture`,
 };
+
+// "auto": the user just uploaded something via "add travel item" without
+// saying what it is — classify it first, then extract that category's fields.
+SCHEMAS.auto = `First decide which ONE category the image(s) belong to:
+  "transport" — a ticket or booking for getting from A to B (flight, train, bus, ferry, car / rideshare)
+  "stay"      — somewhere to sleep for one or more nights (hotel, hostel, rental, house sit,
+                retreat, residential course)
+  "activity"  — something done during a day that is neither travel nor a night's stay
+                (hike, guided tour, museum / attraction ticket, class, concert, event)
+  "doc"       — a visa, ESTA, passport, vaccination certificate, insurance policy
+Return a JSON object: {"category": "<one of the four>", "fields": { ... }} where
+"fields" follows the schema for that category:
+
+[transport]${SCHEMAS.transport}
+
+[stay]${SCHEMAS.stay}
+
+[activity]${SCHEMAS.activity}
+
+[doc]${SCHEMAS.doc}`;
 
 // Tried in order; first that responds wins. Flash-tier vision models
 // confirmed available on the project's key (see GET ?models).
@@ -181,9 +215,14 @@ export default async function handler(req, res) {
         const m = text.match(/\{[\s\S]*\}/);
         if (m) { try { parsed = JSON.parse(m[0]); } catch {} }
       }
+      let category;
+      if (kind === 'auto' && parsed && typeof parsed === 'object') {
+        category = ['transport', 'stay', 'activity', 'doc'].includes(parsed.category) ? parsed.category : null;
+        parsed = parsed.fields && typeof parsed.fields === 'object' ? parsed.fields : {};
+      }
       if (parsed && typeof parsed === 'object') { delete parsed.name; delete parsed.passenger; }
       // wrap so the client can distinguish "read nothing" from an error
-      return res.status(200).json({ fields: parsed || {}, model, raw: text.slice(0, 600) });
+      return res.status(200).json({ fields: parsed || {}, category, model, raw: text.slice(0, 600) });
     }
     return res.status(502).json({ error: 'gemini error', detail: lastErr });
   } catch (err) {
