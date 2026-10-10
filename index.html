@@ -120,6 +120,11 @@
   .pill-stay { background: var(--faint); color: var(--muted); }
   .pill-activity { background: var(--violet-dim); color: var(--violet); }
 
+  .new-tag-panel { border: 0.5px dashed var(--border2); border-radius: var(--r); padding: 10px; margin: -4px 0 12px; }
+  .new-tag-panel .field { margin-bottom: 8px; }
+  .nt-actions { display: flex; align-items: center; justify-content: flex-end; gap: 6px; }
+  .nt-msg { flex: 1; font-size: 11px; font-family: 'DM Mono', monospace; color: var(--red); }
+
   /* "Add travel item" chooser */
   .add-choices { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 12px; }
   .add-choice { text-align: left; padding: 12px; display: flex; flex-direction: column; gap: 3px; }
@@ -239,7 +244,8 @@
   .field textarea { min-height: 60px; resize: vertical; }
   .field input:focus, .field select:focus, .field textarea:focus { outline: none; border-color: var(--green); }
   .field-2 { display: flex; gap: 10px; }
-  .field-2 > .field { flex: 1; }
+  .field-2 > .field { flex: 1; min-width: 0; }
+  .field-2 > .field input { min-width: 0; width: 100%; }
   .modal-actions { display: flex; gap: 8px; justify-content: space-between; margin-top: 8px; }
   .modal-actions .right { display: flex; gap: 8px; }
   .modal-msg { font-size: 11px; font-family: 'DM Mono', monospace; min-height: 14px; margin-top: 8px; color: var(--red); }
@@ -1559,6 +1565,7 @@ function guessCurrency(destination) {
 }
 
 let currentTrip = null, currentStays = [], currentTransport = [], currentActivities = [], currentDocs = [];
+let customTags = [];   // [{ category, value }] — the user's own type tags
 
 async function openTrip(tripId) {
   show('detail');
@@ -1566,13 +1573,15 @@ async function openTrip(tripId) {
   document.querySelectorAll('#detail .panel').forEach((p, i) => p.classList.toggle('active', i === 0));
   invalidateComplianceCache();
 
-  const [{ data: trip }, { data: stays }, { data: transport }, { data: activities }, { data: user }] = await Promise.all([
+  const [{ data: trip }, { data: stays }, { data: transport }, { data: activities }, { data: tags }, { data: user }] = await Promise.all([
     sb.from('trips').select('*').eq('id', tripId).single(),
     sb.from('stays').select('*').eq('trip_id', tripId).order('start_date', { ascending: true }),
     sb.from('transport').select('*').eq('trip_id', tripId).order('departure', { ascending: true }),
     // null (not an error thrown) if the activities table hasn't been
     // created yet — the trip still renders, just without activities.
     sb.from('activities').select('*').eq('trip_id', tripId).order('start_at', { ascending: true }),
+    // RLS scopes this to the signed-in user's own tags.
+    sb.from('custom_tags').select('category, value').order('created_at', { ascending: true }),
     sb.auth.getUser(),
   ]);
   if (!trip) { routeToOverview(); return; }
@@ -1589,6 +1598,7 @@ async function openTrip(tripId) {
   currentStays = stays || [];
   currentTransport = transport || [];
   currentActivities = activities || [];
+  customTags = tags || [];
   currentDocs = docs || [];
 
   $('detail-name').textContent = trip?.name || 'Trip';
@@ -2680,6 +2690,8 @@ function openForm(opts) {
   $('modal').classList.remove('hidden');
   $('modal').onclick = (e) => { if (e.target === $('modal')) closeModal(); };
   $('modal').querySelectorAll('.tag-input').forEach(wireTagInput);
+  const typeSel = $('modal').querySelector('select[data-key="type"]');
+  if (opts.tagCategory && typeSel) wireNewTag(typeSel, opts.tagCategory);
 
   // Conditional fields: show a [data-showif="field:v1|v2"] only when the
   // referenced field currently holds one of those values.
@@ -2808,9 +2820,9 @@ function openForm(opts) {
       // value is just a default, never user input at this point).
       if (k === 'type' && el.tagName === 'SELECT') {
         const want = normParsedType(String(val).toLowerCase());
-        const opt = [...el.options].find(o =>
+        const opt = [...el.options].find(o => o.value !== NEW_TAG && (
           o.value.toLowerCase() === want || o.text.toLowerCase().includes(want) ||
-          o.value.toLowerCase() === String(val).toLowerCase());
+          o.value.toLowerCase() === String(val).toLowerCase()));
         if (opt) { el.value = opt.value; any = true; el.dispatchEvent(new Event('change')); }
         continue;
       }
@@ -2843,6 +2855,7 @@ function openForm(opts) {
     $('modal-msg').textContent = '';
     try {
       const data = readForm();
+      if (data.type === NEW_TAG) throw new Error('add the new tag first, or pick another type');
       const keep = attach ? !!$('attach-keep')?.checked : false;
       if (attach) {
         data.attachment_paths = keep ? keptPaths.slice() : [];
@@ -3036,6 +3049,97 @@ const DOC_FIELDS = [
   { key: 'notes', label: 'Notes', type: 'textarea' },
 ];
 
+// The Type select for a category, with the user's own tags and a
+// "+ new tag…" option added under Other.
+const NEW_TAG = '__new__';
+const TAG_CATEGORIES = [
+  { key: 'transport', label: 'Transport' },
+  { key: 'stay', label: 'Overnight stay' },
+  { key: 'activity', label: 'Daily activity' },
+];
+function withCustomTags(fields, category) {
+  return fields.map(f => {
+    if (f.key !== 'type') return f;
+    const asOpt = (o) => (typeof o === 'object' ? o : { value: o, label: o });
+    let groups = f.groups ? f.groups.map(g => ({ ...g, options: g.options.map(asOpt) }))
+      : [{ label: '', options: f.options.map(asOpt) }];
+    // pull "other" out so it sits with "+ new tag…" at the very end
+    groups = groups.map(g => ({ ...g, options: g.options.filter(o => o.value !== 'other') }))
+      .filter(g => g.options.length);
+    const known = new Set(groups.flatMap(g => g.options.map(o => o.value.toLowerCase())));
+    const own = customTags.filter(t => t.category === category && !known.has(t.value.toLowerCase()))
+      .map(t => ({ value: t.value, label: t.value }));
+    if (own.length) groups.push({ label: 'Your tags', options: own });
+    groups.push({ label: '', options: [{ value: 'other', label: 'Other' }, { value: NEW_TAG, label: '+ new tag…' }] });
+    return { ...f, options: undefined, groups };
+  });
+}
+
+// Inline "new tag" panel under the Type select: name + category. A tag in
+// this form's category is added and selected; one for another category is
+// saved for next time and the select goes back to what it was.
+function wireNewTag(sel, category) {
+  let prev = sel.value === NEW_TAG ? 'other' : sel.value;
+  const panel = document.createElement('div');
+  panel.className = 'new-tag-panel hidden';
+  panel.innerHTML = `
+    <div class="field-2">
+      <div class="field"><label>New tag</label><input type="text" class="nt-name" maxlength="40" placeholder="e.g. rickshaw, ashram, rafting"></div>
+      <div class="field"><label>Category</label><select class="nt-cat">${TAG_CATEGORIES.map(c =>
+        `<option value="${c.key}"${c.key === category ? ' selected' : ''}>${esc(c.label)}</option>`).join('')}</select></div>
+    </div>
+    <div class="nt-actions">
+      <span class="nt-msg"></span>
+      <button type="button" class="btn btn-ghost btn-sm nt-cancel">cancel</button>
+      <button type="button" class="btn btn-green btn-sm nt-add">add tag</button>
+    </div>`;
+  sel.closest('.field').after(panel);
+  const name = panel.querySelector('.nt-name'), cat = panel.querySelector('.nt-cat');
+  const msg = panel.querySelector('.nt-msg'), addBtn = panel.querySelector('.nt-add');
+  const close = () => { panel.classList.add('hidden'); name.value = ''; msg.textContent = ''; };
+  sel.addEventListener('change', () => {
+    if (sel.value === NEW_TAG) { panel.classList.remove('hidden'); cat.value = category; name.focus(); }
+    else { prev = sel.value; close(); }
+  });
+  panel.querySelector('.nt-cancel').onclick = () => { close(); sel.value = prev; sel.dispatchEvent(new Event('change')); };
+  name.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); addBtn.click(); } });
+  addBtn.onclick = async () => {
+    const value = name.value.trim().replace(/\s+/g, ' ');
+    const c = cat.value;
+    if (!value) { msg.textContent = 'give the tag a name'; return; }
+    if (value === NEW_TAG) return;
+    // Already one of this category's options (built-in or own)? Just use it.
+    const existing = c === category && [...sel.options].find(o => o.value.toLowerCase() === value.toLowerCase() && o.value !== NEW_TAG);
+    if (existing) { sel.value = existing.value; sel.dispatchEvent(new Event('change')); return; }
+    if (!customTags.some(t => t.category === c && t.value.toLowerCase() === value.toLowerCase())) {
+      addBtn.disabled = true;
+      const { error } = await sb.from('custom_tags').insert({ category: c, value });
+      addBtn.disabled = false;
+      // 23505 = already saved (e.g. from another device) — fine, use it.
+      if (error && error.code !== '23505') { msg.textContent = error.message; return; }
+      customTags.push({ category: c, value });
+    }
+    if (c === category) {
+      let group = [...sel.querySelectorAll('optgroup')].find(g => g.label === 'Your tags');
+      if (!group) {
+        group = document.createElement('optgroup'); group.label = 'Your tags';
+        sel.insertBefore(group, sel.querySelector(`option[value="other"]`).parentElement);
+      }
+      const o = document.createElement('option'); o.value = value; o.textContent = value;
+      group.appendChild(o);
+      sel.value = value; sel.dispatchEvent(new Event('change'));
+    } else {
+      const label = TAG_CATEGORIES.find(x => x.key === c).label.toLowerCase();
+      sel.value = prev; sel.dispatchEvent(new Event('change'));
+      // close() ran via the change handler; leave a note where the panel was
+      const note = document.createElement('div');
+      note.className = 'parse-note'; note.style.margin = '-4px 0 12px';
+      note.textContent = `“${value}” saved as a ${label} tag — it'll be there when you add a ${label}`;
+      panel.after(note); setTimeout(() => note.remove(), 6000);
+    }
+  };
+}
+
 function newTrip() {
   openForm({
     title: 'New trip', fields: TRIP_FIELDS, values: { base_currency: currentProfile?.base_currency || 'EUR' },
@@ -3076,7 +3180,7 @@ function stayForm(row, preload) {
     ? { ...row, type: normStayType(row.type) }
     : { type: 'housesit', currency: currentTrip?.base_currency || 'EUR' };
   openForm({
-    title: editing ? 'Edit stay' : 'Add overnight stay', fields: STAY_FIELDS,
+    title: editing ? 'Edit stay' : 'Add overnight stay', fields: withCustomTags(STAY_FIELDS, 'stay'), tagCategory: 'stay',
     values, preload,
     attach: { table: 'stays', folder: currentTrip.id, rowId: row?.id, kind: 'stay', defaultKeep: false },
     onSave: async (d) => {
@@ -3094,7 +3198,7 @@ function stayForm(row, preload) {
 function transportForm(row, preload) {
   const editing = !!row;
   openForm({
-    title: editing ? 'Edit transport' : 'Add transport', fields: TRANSPORT_FIELDS,
+    title: editing ? 'Edit transport' : 'Add transport', fields: withCustomTags(TRANSPORT_FIELDS, 'transport'), tagCategory: 'transport',
     values: row || { type: 'flight', currency: currentTrip?.base_currency || 'EUR' }, preload,
     attach: { table: 'transport', folder: currentTrip.id, rowId: row?.id, kind: 'transport', defaultKeep: true },
     onSave: async (d) => {
@@ -3131,7 +3235,7 @@ function docForm(row, preload) {
 function activityForm(row, preload) {
   const editing = !!row;
   openForm({
-    title: editing ? 'Edit activity' : 'Add activity', fields: ACTIVITY_FIELDS,
+    title: editing ? 'Edit activity' : 'Add activity', fields: withCustomTags(ACTIVITY_FIELDS, 'activity'), tagCategory: 'activity',
     values: row || { type: 'hike', currency: currentTrip?.base_currency || 'EUR' }, preload,
     attach: { table: 'activities', folder: currentTrip.id, rowId: row?.id, kind: 'activity', defaultKeep: true },
     onSave: async (d) => {
