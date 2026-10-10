@@ -110,9 +110,24 @@ Return a JSON object: {"category": "<one of the four>", "fields": { ... }} where
 
 [doc]${SCHEMAS.doc}`;
 
-// Tried in order; first that responds wins. Flash-tier vision models
-// confirmed available on the project's key (see GET ?models).
-const MODELS = ['gemini-2.5-flash', 'gemini-flash-latest', 'gemini-3.5-flash'];
+// Tried in order; first that responds wins. Google now reroutes
+// gemini-3.5-flash to gemini-3.6-flash and asks callers to name 3.6
+// directly; 2.5 stays as the last fallback. Check GET ?models for what the
+// key can actually use.
+const MODELS = ['gemini-3.6-flash', 'gemini-3.5-flash', 'gemini-2.5-flash'];
+
+// Extraction doesn't need deep reasoning, and thinking tokens are what
+// make a call slow (and count against maxOutputTokens). Gemini 3.x takes a
+// thinking level; 2.5 takes a token budget, 0 = off.
+const thinkingFor = (model) => (model.startsWith('gemini-2.5')
+  ? { thinkingBudget: 0 }
+  : { thinkingLevel: 'low' });
+
+// The browser gives up after 45s. Stay well inside that so a slow model
+// returns a real error (and the next model gets a turn) instead of the
+// user seeing a bare "timed out".
+const CALL_TIMEOUT_MS = 20000;
+const TOTAL_BUDGET_MS = 38000;
 
 async function readBody(req) {
   if (req.body && typeof req.body === 'object') return req.body;
@@ -175,25 +190,41 @@ export default async function handler(req, res) {
           { text: sys + '\n\n' + SCHEMAS[kind] },
         ],
       }],
-      generationConfig: { temperature: 0, responseMimeType: 'application/json', maxOutputTokens: 2048 },
+      generationConfig: { temperature: 0, responseMimeType: 'application/json', maxOutputTokens: 4096 },
     };
+    const started = Date.now();
 
     const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
     let lastErr = null;
-    // One retry total across the whole model list, not per model — with no
-    // vercel.json maxDuration override this function has ~10s to work with,
-    // and 3 models is already close to that; retrying every one of them
-    // could push a slow request over the edge. Spend the one retry on
-    // whichever call first hits a transient overload/rate-limit.
+    // One retry total across the whole model list, not per model, so a
+    // slow request can't stretch past the browser's patience. Spend the one
+    // retry on whichever call first hits a transient overload/rate-limit.
     let retriedOnce = false;
     for (const model of MODELS) {
+      const left = TOTAL_BUDGET_MS - (Date.now() - started);
+      if (left < 3000) break;
       const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
-      const call = () => fetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-goog-api-key': key },
-        body: JSON.stringify(payload),
+      const body = JSON.stringify({
+        ...payload,
+        generationConfig: { ...payload.generationConfig, thinkingConfig: thinkingFor(model) },
       });
+      // A timeout is reported like any other failed call (status 504), so
+      // the loop moves on to the next model.
+      const call = async () => {
+        const ms = Math.min(CALL_TIMEOUT_MS, TOTAL_BUDGET_MS - (Date.now() - started));
+        try {
+          return await fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-goog-api-key': key },
+            body,
+            signal: AbortSignal.timeout(Math.max(ms, 1000)),
+          });
+        } catch (e) {
+          const timedOut = e?.name === 'TimeoutError' || e?.name === 'AbortError';
+          return new Response(timedOut ? `timed out after ${ms}ms` : String(e?.message || e), { status: timedOut ? 504 : 502 });
+        }
+      };
       let gres = await call();
       if (!gres.ok) {
         lastErr = { status: gres.status, body: (await gres.text()).slice(0, 300) };
