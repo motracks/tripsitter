@@ -133,6 +133,30 @@
   .nt-actions { display: flex; align-items: center; justify-content: flex-end; gap: 6px; }
   .nt-msg { flex: 1; font-size: 11px; font-family: 'DM Mono', monospace; color: var(--red); }
 
+  /* Trip progress — full width, same as the Trip overview button */
+  .trip-progress { padding: 0 1.25rem; margin-bottom: 12px; }
+  .tp-labels { display: flex; justify-content: space-between; gap: 10px; font-family: 'DM Mono', monospace; font-size: 10px;
+    color: var(--muted); text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 5px; }
+  .tp-track { height: 4px; background: var(--border2); border-radius: 99px; overflow: hidden; }
+  .tp-fill { height: 100%; background: var(--green); border-radius: 99px; }
+  .details-btn { background: none; border: 0.5px solid var(--border2); border-radius: 99px; color: var(--muted);
+    font-family: 'DM Mono', monospace; font-size: 10px; padding: 2px 8px; margin-left: 8px; cursor: pointer; vertical-align: 1px; }
+
+  /* Trip details sheet */
+  .td-section { margin-bottom: 18px; }
+  .td-section h3 { font-size: 10px; font-family: 'DM Mono', monospace; color: var(--faint); text-transform: uppercase;
+    letter-spacing: 0.1em; font-weight: 400; margin-bottom: 8px; }
+  .td-row { display: flex; justify-content: space-between; gap: 12px; font-size: 12px; padding: 4px 0; }
+  .td-row .td-k { color: var(--muted); display: flex; align-items: center; gap: 7px; min-width: 0; }
+  .td-row .td-v { font-family: 'DM Mono', monospace; text-align: right; white-space: nowrap; }
+  .td-row.td-warn .td-k, .td-row.td-warn .td-v { color: var(--amber); }
+  .td-swatch { width: 10px; height: 10px; border-radius: 3px; flex-shrink: 0; }
+  .td-toggle { display: flex; gap: 6px; margin-bottom: 10px; }
+  .td-toggle button { flex: 1; }
+  .td-toggle button.on { background: var(--surface2); color: var(--text); border-color: var(--border2); }
+  .td-donut { display: block; margin: 0 auto 10px; width: 160px; height: 160px; }
+  .td-donut path { cursor: default; }
+
   /* "Add travel item" chooser */
   .add-choices { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 12px; }
   .add-choice { text-align: left; padding: 12px; display: flex; flex-direction: column; gap: 3px; }
@@ -448,6 +472,8 @@
     </div>
   </header>
 
+  <div class="trip-progress hidden" id="trip-progress"></div>
+
   <div class="trip-nav">
     <button class="tab overview-tab active" data-tab="trip"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11 12 4l9 7"/><path d="M5 10v10h14V10"/></svg>Trip overview</button>
     <div class="tabs">
@@ -545,9 +571,12 @@ function toLocalDatetimeInputValue(ts) {
 }
 // Length of a trip, counting both the first and last day: "38 days",
 // plus "1 month and 8 days" past 30 days, plus its share of a year.
+function tripDays(start, end) {
+  return start && end && end >= start ? nights(start, end) + 1 : null;
+}
 function tripLengthText(start, end) {
-  if (!start || !end || end < start) return '';
-  const days = nights(start, end) + 1;
+  const days = tripDays(start, end);
+  if (!days) return '';
   const parts = [`${days} day${days === 1 ? '' : 's'}`];
   if (days > 30) {
     // Whole calendar months from the start, then the days left over
@@ -1520,9 +1549,9 @@ async function routeToOverview() {
 
 function tripCardHTML(t) {
   const base = t.base_currency || 'EUR';
-  const length = tripLengthText(t.start_date, t.end_date);
+  const days = tripDays(t.start_date, t.end_date);
   const dates = t.start_date
-    ? `${fmtDateY(t.start_date)} – ${fmtDateY(t.end_date)}${length ? ` · ${length}` : ''}`
+    ? `${fmtDateY(t.start_date)} – ${fmtDateY(t.end_date)}${days ? ` · ${days} day${days === 1 ? '' : 's'}` : ''}`
     : '';
   const current = overviewCurrent[t.id];
   return `<div class="trip-card" data-trip="${t.id}">
@@ -1645,9 +1674,8 @@ async function openTrip(tripId) {
 
   $('detail-name').textContent = trip?.name || 'Trip';
   const dateRange = trip ? `${fmtDate(trip.start_date)} – ${fmtDate(trip.end_date)}`.trim() : '';
-  const length = trip ? tripLengthText(trip.start_date, trip.end_date) : '';
   $('detail-sub').innerHTML = trip
-    ? `${placeTagsHTML(trip.place_tags, trip.destination)}<div style="margin-top:4px">${esc(dateRange)}${length ? length.split(' · ').map(part => ` · <span style="white-space:nowrap">${esc(part)}</span>`).join('') : ''}</div>`
+    ? `${placeTagsHTML(trip.place_tags, trip.destination)}<div style="margin-top:4px">${esc(dateRange)}<button class="details-btn" onclick="openTripDetails()">details</button></div>`
     : '';
 
   // Load once so flight origins/destinations render as "City (CODE)" from
@@ -1655,6 +1683,7 @@ async function openTrip(tripId) {
   if (currentTransport.some(t => (t.type || '').toLowerCase() === 'flight')) await loadAirports();
 
   renderVisaHeader(trip);
+  renderTripProgress();
   renderTimeline(currentStays, currentTransport, currentActivities);
   renderTripMapForCurrentTrip();
   backfillTripGeo();
@@ -2161,6 +2190,193 @@ function itemEndDay(kind, d) {
   if (kind === 'activity') return localDayStr(new Date(d.end_at || d.start_at));
   return localDayStr(new Date(d.arrival || d.departure));
 }
+
+// Where today falls in the trip: days done (before today) and to come
+// (today onwards), clamped to the trip.
+function tripProgress(trip) {
+  const total = tripDays(trip?.start_date, trip?.end_date);
+  if (!total) return null;
+  const today = localDayStr(new Date());
+  const done = Math.min(total, Math.max(0, nights(trip.start_date, today)));
+  return { total, done, toCome: total - done, today,
+    phase: today < trip.start_date ? 'before' : today > trip.end_date ? 'after' : 'during' };
+}
+const pctText = (part, whole) => {
+  if (!whole) return '0%';
+  const p = part / whole * 100;
+  return (p > 0 && p < 10 ? p.toFixed(1).replace(/\.0$/, '') : Math.round(p)) + '%';
+};
+
+function renderTripProgress() {
+  const el = $('trip-progress');
+  const pr = tripProgress(currentTrip);
+  if (!pr) { el.classList.add('hidden'); return; }
+  const left = pr.phase === 'before' ? `Starts in ${nights(pr.today, currentTrip.start_date)} day${nights(pr.today, currentTrip.start_date) === 1 ? '' : 's'}`
+    : pr.phase === 'after' ? `Trip complete · ${pr.total} days`
+    : `Day ${pr.done + 1} of ${pr.total}`;
+  const right = pr.phase === 'during' ? `${pctText(pr.done, pr.total)} · ${pr.toCome} day${pr.toCome === 1 ? '' : 's'} to go` : pctText(pr.done, pr.total);
+  el.innerHTML = `<div class="tp-labels"><span>${esc(left)}</span><span>${esc(right)}</span></div>
+    <div class="tp-track" role="progressbar" aria-valuemin="0" aria-valuemax="${pr.total}" aria-valuenow="${pr.done}"><div class="tp-fill" style="width:${pr.done / pr.total * 100}%"></div></div>`;
+  el.classList.remove('hidden');
+}
+
+// Display label for a type value: the built-in select label, else the
+// value itself (user-created tags).
+function typeLabel(fields, value) {
+  const f = fields.find(x => x.key === 'type');
+  const opts = f.groups ? f.groups.flatMap(g => g.options) : f.options;
+  const o = opts.find(o => (typeof o === 'object' ? o.value : o) === value);
+  const label = o ? (typeof o === 'object' ? o.label : o) : value;
+  return label ? label.charAt(0).toUpperCase() + label.slice(1) : 'Other';
+}
+
+// Dark-mode categorical palette (validated against --surface: all six
+// checks pass). Assigned in this fixed order, never cycled; past 8 slices
+// the rest fold into "Other".
+const CHART_COLORS = ['#3987e5', '#d95926', '#199e70', '#c98500', '#d55181', '#008300', '#9085e9', '#e66767'];
+
+function donutSVG(slices) {
+  const total = slices.reduce((a, x) => a + x.value, 0);
+  const R = 80, r = 52, C = 80;
+  const pt = (rad, ang) => [C + rad * Math.sin(ang), C - rad * Math.cos(ang)];
+  let a0 = 0;
+  const paths = slices.map(x => {
+    const frac = x.value / total;
+    const a1 = a0 + frac * Math.PI * 2;
+    let d;
+    if (frac >= 0.9999) {   // a full ring can't be drawn as one arc
+      d = `M${C},${C - R}A${R},${R} 0 1 1 ${C - 0.01},${C - R}L${C - 0.01},${C - r}A${r},${r} 0 1 0 ${C},${C - r}Z`;
+    } else {
+      const big = a1 - a0 > Math.PI ? 1 : 0;
+      const [x0, y0] = pt(R, a0), [x1, y1] = pt(R, a1), [x2, y2] = pt(r, a1), [x3, y3] = pt(r, a0);
+      d = `M${x0},${y0}A${R},${R} 0 ${big} 1 ${x1},${y1}L${x2},${y2}A${r},${r} 0 ${big} 0 ${x3},${y3}Z`;
+    }
+    a0 = a1;
+    return `<path d="${d}" fill="${x.color}" stroke="var(--surface)" stroke-width="2"><title>${esc(x.label)}: ${esc(x.text)}</title></path>`;
+  }).join('');
+  return `<svg class="td-donut" viewBox="0 0 160 160" role="img" aria-label="Spending breakdown">${paths}</svg>`;
+}
+
+function openTripDetails() {
+  const trip = currentTrip;
+  if (!trip) return;
+  const base = trip.base_currency || 'EUR';
+  const row = (k, v, cls = '', swatch = '') =>
+    `<div class="td-row ${cls}"><span class="td-k">${swatch ? `<span class="td-swatch" style="background:${swatch}"></span>` : ''}${esc(k)}</span><span class="td-v">${esc(v)}</span></div>`;
+  const plural = (n, w) => `${n} ${w}${n === 1 ? '' : 's'}`;
+  const sections = [];
+
+  // Length + progress
+  const pr = tripProgress(trip);
+  if (pr) {
+    sections.push(`<div class="td-section"><h3>Length</h3>
+      ${tripLengthText(trip.start_date, trip.end_date).split(' · ').map(p => `<div class="td-row"><span class="td-v" style="text-align:left">${esc(p)}</span></div>`).join('')}
+    </div>`);
+    sections.push(`<div class="td-section"><h3>Progress</h3>
+      ${row('Done', `${plural(pr.done, 'day')} (${pctText(pr.done, pr.total)})`)}
+      ${row('To come', `${plural(pr.toCome, 'day')} (${pctText(pr.toCome, pr.total)})`)}
+    </div>`);
+  }
+
+  // Nights by kind of stay, within the trip's dates
+  if (trip.start_date && trip.end_date && trip.end_date > trip.start_date) {
+    const totalNights = nights(trip.start_date, trip.end_date);
+    const byType = new Map();
+    const taken = new Set();
+    for (const st of currentStays) {
+      if (!st.start_date || !st.end_date) continue;
+      for (let d = st.start_date; d < st.end_date; d = addDaysStr(d, 1)) {
+        if (d < trip.start_date || d >= trip.end_date || taken.has(d)) continue;
+        taken.add(d);
+        const label = typeLabel(STAY_FIELDS, normStayType(st.type) || 'other');
+        byType.set(label, (byType.get(label) || 0) + 1);
+      }
+    }
+    const missing = unplannedNights(trip, currentStays, currentTransport).reduce((a, g) => a + g.n, 0);
+    const onTheMove = totalNights - taken.size - missing;
+    const rows = [...byType].sort((a, b) => b[1] - a[1])
+      .map(([k, n]) => row(k, `${plural(n, 'day')} (${pctText(n, totalNights)})`));
+    if (onTheMove > 0) rows.push(row('Overnight transport', `${plural(onTheMove, 'day')} (${pctText(onTheMove, totalNights)})`));
+    rows.push(row('Unaccounted for', `${plural(missing, 'day')} (${pctText(missing, totalNights)})`, missing ? 'td-warn' : ''));
+    sections.push(`<div class="td-section"><h3>Where you slept · ${plural(totalNights, 'night')}</h3>${rows.join('')}</div>`);
+  }
+
+  // Time in transit
+  const legs = currentTransport.filter(t => t.departure && t.arrival && new Date(t.arrival) > new Date(t.departure));
+  if (legs.length) {
+    const mins = (t) => Math.round((new Date(t.arrival) - new Date(t.departure)) / 60000);
+    const fmtDur = (m) => `${Math.floor(m / 60)}h ${String(m % 60).padStart(2, '0')}m`;
+    const total = legs.reduce((a, t) => a + mins(t), 0);
+    const byMode = new Map();
+    legs.forEach(t => { const k = typeLabel(TRANSPORT_FIELDS, (t.type || 'other').toLowerCase()); byMode.set(k, (byMode.get(k) || 0) + mins(t)); });
+    sections.push(`<div class="td-section"><h3>Time in transit</h3>
+      ${row(`Total · ${plural(legs.length, 'leg')}`, fmtDur(total) + (total >= 1440 ? ` (${(total / 1440).toFixed(1)} days)` : ''))}
+      ${[...byMode].sort((a, b) => b[1] - a[1]).map(([k, m]) => row(k, fmtDur(m))).join('')}
+    </div>`);
+  }
+
+  // Spending
+  const val = (r) => r.amount_base != null ? Number(r.amount_base) || 0
+    : ((r.currency || 'EUR') === base ? Number(r.price) || 0 : 0);
+  const docs = tripDocs(currentDocs, trip.country_codes);
+  const groups = [
+    { key: 'stay', label: 'Stays', rows: currentStays, fields: STAY_FIELDS, type: r => normStayType(r.type) || 'other' },
+    { key: 'transport', label: 'Transport', rows: currentTransport, fields: TRANSPORT_FIELDS, type: r => (r.type || 'other').toLowerCase() },
+    { key: 'activity', label: 'Activities', rows: currentActivities, fields: ACTIVITY_FIELDS, type: r => r.type || 'other' },
+    { key: 'doc', label: 'Visa & documents', rows: docs, fields: DOC_FIELDS, type: r => r.doc_type || 'other', typeKey: 'doc_type' },
+  ];
+  // Categories keep one color each whatever their size; tags take the
+  // palette in size order.
+  const byCategory = groups.map((g, i) => ({ label: g.label, value: g.rows.reduce((a, r) => a + val(r), 0), color: CHART_COLORS[i] }));
+  const byTag = new Map();
+  groups.forEach(g => g.rows.forEach(r => {
+    const t = g.type(r);
+    const label = g.key === 'doc' ? t : typeLabel(g.fields, t);
+    const k = `${label} · ${g.label.toLowerCase()}`;
+    byTag.set(k, (byTag.get(k) || 0) + val(r));
+  }));
+  const toSlices = (list) => {
+    let xs = list.filter(x => x.value > 0).sort((a, b) => b.value - a.value);
+    if (xs.length > 8) xs = [...xs.slice(0, 7), { label: 'Other', value: xs.slice(7).reduce((a, x) => a + x.value, 0) }];
+    const sum = xs.reduce((a, x) => a + x.value, 0);
+    return xs.map((x, i) => ({ ...x, color: x.color || CHART_COLORS[i], text: `${fmtMoney(x.value, base)} (${pctText(x.value, sum)})` }));
+  };
+  const views = {
+    categories: toSlices(byCategory),
+    tags: toSlices([...byTag].map(([label, value]) => ({ label, value }))),
+  };
+  const spendingBody = (v) => {
+    const xs = views[v];
+    if (!xs.length) return '<p class="empty-note">No prices entered yet.</p>';
+    const sum = xs.reduce((a, x) => a + x.value, 0);
+    return donutSVG(xs) + xs.map(x => row(x.label, x.text, '', x.color)).join('')
+      + row('Total', fmtMoney(sum, base));
+  };
+  sections.push(`<div class="td-section"><h3>How you spent your money</h3>
+    <div class="td-toggle">
+      <button type="button" class="btn btn-ghost btn-sm on" data-view="categories">Categories</button>
+      <button type="button" class="btn btn-ghost btn-sm" data-view="tags">Every tag</button>
+    </div>
+    <div id="td-spending">${spendingBody('categories')}</div>
+  </div>`);
+
+  $('modal').innerHTML = `
+    <div class="modal-box">
+      <h2>${esc(trip.name || 'Trip')}</h2>
+      <div class="mb-sub">${esc(fmtDateY(trip.start_date))} – ${esc(fmtDateY(trip.end_date))}</div>
+      ${sections.join('')}
+      <div class="modal-actions"><span></span><div class="right">
+        <button type="button" class="btn btn-ghost btn-sm" onclick="closeModal()">close</button>
+      </div></div>
+    </div>`;
+  $('modal').classList.remove('hidden');
+  $('modal').onclick = (e) => { if (e.target === $('modal')) closeModal(); };
+  $('modal').querySelectorAll('.td-toggle button').forEach(b => b.onclick = () => {
+    $('modal').querySelectorAll('.td-toggle button').forEach(x => x.classList.toggle('on', x === b));
+    $('td-spending').innerHTML = spendingBody(b.dataset.view);
+  });
+}
+window.openTripDetails = openTripDetails;
 
 // Nights inside the trip with no stay booked and no overnight transport
 // (a night bus/flight is a night accounted for). Returns runs of
