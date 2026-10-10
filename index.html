@@ -543,6 +543,33 @@ function toLocalDatetimeInputValue(ts) {
   const pad = (n) => String(n).padStart(2, '0');
   return `${dt.getFullYear()}-${pad(dt.getMonth() + 1)}-${pad(dt.getDate())}T${pad(dt.getHours())}:${pad(dt.getMinutes())}`;
 }
+// Length of a trip, counting both the first and last day: "38 days",
+// plus "1 month and 8 days" past 30 days, plus its share of a year.
+function tripLengthText(start, end) {
+  if (!start || !end || end < start) return '';
+  const days = nights(start, end) + 1;
+  const parts = [`${days} day${days === 1 ? '' : 's'}`];
+  if (days > 30) {
+    // Whole calendar months from the start, then the days left over
+    // (to the morning after the last day).
+    const [y, m, d] = start.split('-').map(Number);
+    const stop = new Date(Date.UTC(...end.split('-').map((v, i) => Number(v) - (i === 1 ? 1 : 0))) + 86400000);
+    let months = 0;
+    const plus = (k) => {
+      const t = new Date(Date.UTC(y, m - 1 + k, 1));
+      const lastDay = new Date(Date.UTC(t.getUTCFullYear(), t.getUTCMonth() + 1, 0)).getUTCDate();
+      t.setUTCDate(Math.min(d, lastDay));     // 31 Jan + 1 month → 28/29 Feb
+      return t;
+    };
+    while (plus(months + 1) <= stop) months++;
+    const rest = Math.round((stop - plus(months)) / 86400000);
+    parts.push(`${months} month${months === 1 ? '' : 's'}` + (rest ? ` and ${rest} day${rest === 1 ? '' : 's'}` : ''));
+  }
+  const pct = days / 365 * 100;
+  parts.push(`${pct < 10 ? pct.toFixed(1).replace(/\.0$/, '') : Math.round(pct)}% of a year`);
+  return parts.join(' · ');
+}
+
 function nights(a, b) {
   if (!a || !b) return null;
   return Math.round((new Date(b) - new Date(a)) / 86400000);
@@ -1493,9 +1520,9 @@ async function routeToOverview() {
 
 function tripCardHTML(t) {
   const base = t.base_currency || 'EUR';
-  const n = nights(t.start_date, t.end_date);
+  const length = tripLengthText(t.start_date, t.end_date);
   const dates = t.start_date
-    ? `${fmtDateY(t.start_date)} – ${fmtDateY(t.end_date)}${n != null ? ` · ${n} day${n === 1 ? '' : 's'}` : ''}`
+    ? `${fmtDateY(t.start_date)} – ${fmtDateY(t.end_date)}${length ? ` · ${length}` : ''}`
     : '';
   const current = overviewCurrent[t.id];
   return `<div class="trip-card" data-trip="${t.id}">
@@ -1618,8 +1645,9 @@ async function openTrip(tripId) {
 
   $('detail-name').textContent = trip?.name || 'Trip';
   const dateRange = trip ? `${fmtDate(trip.start_date)} – ${fmtDate(trip.end_date)}`.trim() : '';
+  const length = trip ? tripLengthText(trip.start_date, trip.end_date) : '';
   $('detail-sub').innerHTML = trip
-    ? `${placeTagsHTML(trip.place_tags, trip.destination)}<div style="margin-top:4px">${esc(dateRange)}</div>`
+    ? `${placeTagsHTML(trip.place_tags, trip.destination)}<div style="margin-top:4px">${esc(dateRange)}${length ? length.split(' · ').map(part => ` · <span style="white-space:nowrap">${esc(part)}</span>`).join('') : ''}</div>`
     : '';
 
   // Load once so flight origins/destinations render as "City (CODE)" from
