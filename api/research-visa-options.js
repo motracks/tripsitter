@@ -47,7 +47,7 @@ const TARGETS = [
   },
 ];
 
-const MODELS = ['gemini-2.5-flash', 'gemini-flash-latest', 'gemini-3.5-flash'];
+const MODELS = ['gemini-3.6-flash', 'gemini-3.5-flash', 'gemini-2.5-flash'];
 
 const PROMPT = `You are helping a developer draft a small reference table of
 visa duration/fee OPTIONS for a travel app. You will be given the fetched
