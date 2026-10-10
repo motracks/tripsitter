@@ -107,6 +107,9 @@
   .tl-dot.train { border-color: var(--amber); background: var(--amber-dim); }
   .tl-dot.stay { border-color: var(--faint); background: var(--bg); }
   .tl-dot.activity { border-color: var(--violet); background: var(--violet-dim); }
+  .tl-hide-past .tl-past { display: none; }
+  .tl-past-toggle { display: block; margin: 0 0 10px 52px; background: none; border: 0.5px solid var(--border2);
+    border-radius: 99px; padding: 4px 10px; color: var(--muted); font-family: 'DM Mono', monospace; font-size: 10px; cursor: pointer; }
   .tl-dot.gap { border-style: dashed; border-color: var(--amber); background: var(--bg); }
   /* Unplanned nights: a quiet dashed placeholder, not an alarm. */
   .tl-card.tl-gap { background: none; border: 0.5px dashed rgba(245,197,66,0.35); cursor: default; }
@@ -1158,7 +1161,14 @@ async function renderTripMapForCurrentTrip() {
   const wrap = $('trip-map');
   renderCurrentStatus();
   const current = currentTravelState(currentStays, currentTransport);
-  const data = tripMapData(currentStays, currentTransport, current);
+  // Folded to "now": only where you are and where you're going (falls back
+  // to the whole trip if nothing ahead has coordinates yet).
+  const cutoff = pastFoldedCutoff();
+  const data = (cutoff && tripMapData(
+      currentStays.filter(s => itemEndDay('stay', s) >= cutoff),
+      currentTransport.filter(t => (t.arrival || t.departure) && itemEndDay('transport', t) >= cutoff),
+      current))
+    || tripMapData(currentStays, currentTransport, current);
   if (!data) { wrap.classList.add('hidden'); return; }
   await loadWorldGeo();
   if (!worldGeo) { wrap.classList.add('hidden'); return; }
@@ -2095,34 +2105,60 @@ async function renderVisaHeader(trip) {
 const dotClass = (type) => ({ flight: 'flight', bus: 'bus', train: 'train' }[type] || 'stay');
 const pillClass = (type) => ({ flight: 'pill-flight', bus: 'pill-bus', train: 'pill-train' }[type] || 'pill-stay');
 
+// Local calendar day "YYYY-MM-DD" for a Date, and day arithmetic on those.
+const localDayStr = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+const addDaysStr = (str, n) => { const d = new Date(str + 'T00:00:00Z'); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); };
+// Trips whose folded-away past items the user has expanded (this session).
+const pastShownFor = new Set();
+
+// While a trip is underway, the overview starts at "now": anything that
+// finished more than two days ago (so a stay you're still in always shows)
+// is folded away — on the timeline and the map — until the user expands
+// it. Returns that cutoff day, or null when the trip isn't underway.
+function pastCutoff() {
+  const today = localDayStr(new Date());
+  const t = currentTrip;
+  if (!t?.start_date || !t?.end_date || today < t.start_date || today > t.end_date) return null;
+  return addDaysStr(today, -2);
+}
+// The cutoff only while the past is actually folded away.
+function pastFoldedCutoff() {
+  const c = pastCutoff();
+  return c && !pastShownFor.has(currentTrip.id) ? c : null;
+}
+// Last local day a timeline item covers.
+function itemEndDay(kind, d) {
+  if (kind === 'gap') return addDaysStr(d.to, -1);   // last unplanned night
+  if (kind === 'stay') return d.end_date || d.start_date;
+  if (kind === 'activity') return localDayStr(new Date(d.end_at || d.start_at));
+  return localDayStr(new Date(d.arrival || d.departure));
+}
+
 // Nights inside the trip with no stay booked and no overnight transport
 // (a night bus/flight is a night accounted for). Returns runs of
 // consecutive nights: [{ from, to, n }] where `to` is the morning after the
 // last unplanned night, i.e. the check-out date a stay would need.
 function unplannedNights(trip, stays, transport) {
-  const dayStr = (d) => d.toISOString().slice(0, 10);
-  const addDays = (str, n) => { const d = new Date(str + 'T00:00:00Z'); d.setUTCDate(d.getUTCDate() + n); return dayStr(d); };
-  const localDay = (ts) => { const d = new Date(ts); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
   const dated = stays.filter(s => s.start_date && s.end_date);
   const start = trip?.start_date || dated.map(s => s.start_date).sort()[0];
   const end = trip?.end_date || dated.map(s => s.end_date).sort().at(-1);
   if (!start || !end || end <= start) return [];
 
   const covered = new Set();
-  const cover = (from, to) => { for (let d = from; d < to; d = addDays(d, 1)) covered.add(d); };
+  const cover = (from, to) => { for (let d = from; d < to; d = addDaysStr(d, 1)) covered.add(d); };
   dated.forEach(s => cover(s.start_date, s.end_date));
   transport.forEach(t => {
     if (!t.departure || !t.arrival) return;
-    const dep = localDay(t.departure), arr = localDay(t.arrival);
+    const dep = localDayStr(new Date(t.departure)), arr = localDayStr(new Date(t.arrival));
     if (arr > dep) cover(dep, arr);
   });
 
   const runs = [];
-  for (let d = start; d < end; d = addDays(d, 1)) {
+  for (let d = start; d < end; d = addDaysStr(d, 1)) {
     if (covered.has(d)) continue;
     const last = runs.at(-1);
-    if (last && last.to === d) { last.to = addDays(d, 1); last.n++; }
-    else runs.push({ from: d, to: addDays(d, 1), n: 1 });
+    if (last && last.to === d) { last.to = addDaysStr(d, 1); last.n++; }
+    else runs.push({ from: d, to: addDaysStr(d, 1), n: 1 });
   }
   return runs;
 }
@@ -2152,7 +2188,7 @@ function renderTimeline(stays, transport, activities = []) {
     return h > 0 ? `${h}h ${m}m` : `${m}m`;
   };
 
-  items.forEach((item, idx) => {
+  const renderItem = (item, idx) => {
     const delay = (0.05 + idx * 0.03).toFixed(2);
 
     // Layover connector: previous item is transport, this is transport, and
@@ -2257,7 +2293,39 @@ function renderTimeline(stays, transport, activities = []) {
           </div>
         </div>`);
     }
+  };
+
+  // Fold away what's already behind you (see pastCutoff()).
+  const cutoff = pastCutoff();
+  let pastCount = 0;
+  items.forEach((item, idx) => {
+    const n0 = tl.children.length;
+    renderItem(item, idx);
+    if (cutoff && itemEndDay(item.kind, item.data) < cutoff) {
+      pastCount++;
+      [...tl.children].slice(n0).forEach(el => el.classList.add('tl-past'));
+    }
   });
+  if (pastCount) {
+    const tripId = currentTrip.id;
+    const shown = () => pastShownFor.has(tripId);
+    const pastDays = Math.max(1, nights(currentTrip.start_date, cutoff));
+    const btn = document.createElement('button');
+    btn.className = 'tl-past-toggle';
+    const paint = () => {
+      tl.classList.toggle('tl-hide-past', !shown());
+      btn.textContent = `${shown() ? '▾ Hide' : '▸ Show'} past ${pastDays} day${pastDays === 1 ? '' : 's'} of your trip`;
+    };
+    btn.onclick = () => {
+      if (shown()) pastShownFor.delete(tripId); else pastShownFor.add(tripId);
+      paint();
+      renderTripMapForCurrentTrip();
+    };
+    tl.querySelector('.tl-line').after(btn);
+    paint();
+  } else {
+    tl.classList.remove('tl-hide-past');
+  }
   hydrateAttachments(tl);
 }
 
