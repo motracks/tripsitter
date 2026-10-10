@@ -1161,7 +1161,14 @@ async function renderTripMapForCurrentTrip() {
   const wrap = $('trip-map');
   renderCurrentStatus();
   const current = currentTravelState(currentStays, currentTransport);
-  const data = tripMapData(currentStays, currentTransport, current);
+  // Folded to "now": only where you are and where you're going (falls back
+  // to the whole trip if nothing ahead has coordinates yet).
+  const cutoff = pastFoldedCutoff();
+  const data = (cutoff && tripMapData(
+      currentStays.filter(s => itemEndDay('stay', s) >= cutoff),
+      currentTransport.filter(t => (t.arrival || t.departure) && itemEndDay('transport', t) >= cutoff),
+      current))
+    || tripMapData(currentStays, currentTransport, current);
   if (!data) { wrap.classList.add('hidden'); return; }
   await loadWorldGeo();
   if (!worldGeo) { wrap.classList.add('hidden'); return; }
@@ -2104,6 +2111,29 @@ const addDaysStr = (str, n) => { const d = new Date(str + 'T00:00:00Z'); d.setUT
 // Trips whose folded-away past items the user has expanded (this session).
 const pastShownFor = new Set();
 
+// While a trip is underway, the overview starts at "now": anything that
+// finished more than two days ago (so a stay you're still in always shows)
+// is folded away — on the timeline and the map — until the user expands
+// it. Returns that cutoff day, or null when the trip isn't underway.
+function pastCutoff() {
+  const today = localDayStr(new Date());
+  const t = currentTrip;
+  if (!t?.start_date || !t?.end_date || today < t.start_date || today > t.end_date) return null;
+  return addDaysStr(today, -2);
+}
+// The cutoff only while the past is actually folded away.
+function pastFoldedCutoff() {
+  const c = pastCutoff();
+  return c && !pastShownFor.has(currentTrip.id) ? c : null;
+}
+// Last local day a timeline item covers.
+function itemEndDay(kind, d) {
+  if (kind === 'gap') return addDaysStr(d.to, -1);   // last unplanned night
+  if (kind === 'stay') return d.end_date || d.start_date;
+  if (kind === 'activity') return localDayStr(new Date(d.end_at || d.start_at));
+  return localDayStr(new Date(d.arrival || d.departure));
+}
+
 // Nights inside the trip with no stay booked and no overnight transport
 // (a night bus/flight is a night accounted for). Returns runs of
 // consecutive nights: [{ from, to, n }] where `to` is the morning after the
@@ -2265,25 +2295,13 @@ function renderTimeline(stays, transport, activities = []) {
     }
   };
 
-  // While the trip is underway, start at "now": anything that finished more
-  // than two days ago (so a stay you're still in always stays visible) is
-  // folded away behind a toggle. Before and after the trip, show it all.
-  const today = localDayStr(new Date());
-  const active = currentTrip?.start_date && currentTrip?.end_date
-    && currentTrip.start_date <= today && today <= currentTrip.end_date;
-  const cutoff = addDaysStr(today, -2);
-  const endDay = (item) => {
-    const d = item.data;
-    if (item.kind === 'gap') return addDaysStr(d.to, -1);   // last unplanned night
-    if (item.kind === 'stay') return d.end_date || d.start_date;
-    if (item.kind === 'activity') return localDayStr(new Date(d.end_at || d.start_at));
-    return localDayStr(new Date(d.arrival || d.departure));
-  };
+  // Fold away what's already behind you (see pastCutoff()).
+  const cutoff = pastCutoff();
   let pastCount = 0;
   items.forEach((item, idx) => {
     const n0 = tl.children.length;
     renderItem(item, idx);
-    if (active && endDay(item) < cutoff) {
+    if (cutoff && itemEndDay(item.kind, item.data) < cutoff) {
       pastCount++;
       [...tl.children].slice(n0).forEach(el => el.classList.add('tl-past'));
     }
@@ -2291,15 +2309,18 @@ function renderTimeline(stays, transport, activities = []) {
   if (pastCount) {
     const tripId = currentTrip.id;
     const shown = () => pastShownFor.has(tripId);
+    const pastDays = Math.max(1, nights(currentTrip.start_date, cutoff));
     const btn = document.createElement('button');
     btn.className = 'tl-past-toggle';
     const paint = () => {
       tl.classList.toggle('tl-hide-past', !shown());
-      btn.textContent = shown()
-        ? '▾ hide earlier items'
-        : `▸ show ${pastCount} earlier item${pastCount === 1 ? '' : 's'}`;
+      btn.textContent = `${shown() ? '▾ Hide' : '▸ Show'} past ${pastDays} day${pastDays === 1 ? '' : 's'} of your trip`;
     };
-    btn.onclick = () => { if (shown()) pastShownFor.delete(tripId); else pastShownFor.add(tripId); paint(); };
+    btn.onclick = () => {
+      if (shown()) pastShownFor.delete(tripId); else pastShownFor.add(tripId);
+      paint();
+      renderTripMapForCurrentTrip();
+    };
     tl.querySelector('.tl-line').after(btn);
     paint();
   } else {
