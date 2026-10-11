@@ -17,6 +17,8 @@ create table if not exists trips (
   created_at    timestamptz default now()
 );
 alter table trips add column if not exists base_currency text default 'EUR';
+-- Brainstorm notes for days with no stay booked yet, keyed by day ("YYYY-MM-DD").
+alter table trips add column if not exists gap_notes jsonb default '{}'::jsonb;
 
 create table if not exists stays (
   id         uuid primary key default gen_random_uuid(),
@@ -42,6 +44,8 @@ alter table stays add column if not exists base_rate_date date;
 alter table stays add column if not exists lat double precision;
 alter table stays add column if not exists lng double precision;
 alter table stays add column if not exists geo_source text;  -- 'address' | 'placetag' | 'city' | 'manual' | null
+-- ISO2 country the stay is actually in (from geocoding) — used to count days per country for visas.
+alter table stays add column if not exists country text;
 
 create table if not exists transport (
   id           uuid primary key default gen_random_uuid(),
@@ -68,6 +72,9 @@ alter table transport add column if not exists origin_lng double precision;
 alter table transport add column if not exists dest_lat double precision;
 alter table transport add column if not exists dest_lng double precision;
 alter table transport add column if not exists geo_source text;  -- 'iata' | 'station' | 'city' | 'manual' | 'partial' | null
+-- ISO2 countries of both ends (from geocoding / the airport table).
+alter table transport add column if not exists origin_country text;
+alter table transport add column if not exists dest_country text;
 
 -- Daily activities — hikes, tours, classes, events: things you do on a day
 -- of the trip that are neither getting somewhere (transport) nor where you

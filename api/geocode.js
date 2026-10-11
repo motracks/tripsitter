@@ -4,7 +4,9 @@
 // caches hard. Swap the upstream here to change providers (Geoapify /
 // MapTiler / LocationIQ) without touching the client.
 //   GET /api/geocode?q=<free text>&country=<ISO2 optional>
-// → { lat, lng, display_name, source: "nominatim" }   (or { lat: null } on miss)
+// → { lat, lng, country, display_name, source: "nominatim" }   (or { lat: null } on miss)
+//   country = ISO2 of where the hit actually is (from Nominatim's address
+//   details) — exact even for border towns, unlike guessing from coordinates.
 
 const CONTACT = 'mo.tracks.flights@gmail.com'; // Nominatim usage policy: identifiable contact
 
@@ -18,6 +20,7 @@ export default async function handler(req, res) {
     url.searchParams.set('q', q);
     url.searchParams.set('format', 'json');
     url.searchParams.set('limit', '1');
+    url.searchParams.set('addressdetails', '1');
     url.searchParams.set('email', CONTACT);
     if (/^[a-z]{2}$/.test(country)) url.searchParams.set('countrycodes', country);
 
@@ -37,6 +40,7 @@ export default async function handler(req, res) {
     return res.status(200).json({
       lat: Number(hit.lat),
       lng: Number(hit.lon),
+      country: hit.address?.country_code ? String(hit.address.country_code).toUpperCase() : null,
       display_name: hit.display_name || null,
       source: 'nominatim',
     });
