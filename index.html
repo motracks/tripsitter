@@ -115,6 +115,19 @@
   .tl-card.tl-gap { background: none; border: 0.5px dashed rgba(245,197,66,0.35); cursor: default; }
   .tl-gap .tl-title { color: var(--amber); font-size: 14px; font-weight: 500; }
   .tl-gap-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+  .tl-gap-actions { display: flex; flex-direction: column; gap: 5px; align-items: stretch; flex-shrink: 0; }
+  .tl-gap-note { margin-top: 10px; padding-top: 10px; border-top: 0.5px dashed rgba(245,197,66,0.25);
+    font-size: 12px; color: var(--muted); white-space: pre-wrap; line-height: 1.45; }
+  .tl-gap-editor { margin-top: 10px; display: flex; flex-direction: column; gap: 6px; }
+  .tl-gap-editor textarea { width: 100%; background: var(--surface); border: 0.5px solid var(--border2); border-radius: var(--r);
+    color: var(--text); font-family: 'Syne', sans-serif; font-size: 12px; padding: 8px 10px; resize: vertical; }
+  /* Visa deadline: when you have to be out of a country. */
+  .tl-dot.visa { border-color: var(--blue); background: var(--bg); }
+  .tl-dot.visa.over { border-color: var(--red); background: var(--red-dim); }
+  .tl-card.tl-visa { background: none; border: 0.5px dashed rgba(96,170,255,0.35); cursor: default; }
+  .tl-visa .tl-title { color: var(--blue); font-size: 14px; font-weight: 500; }
+  .tl-card.tl-visa.over { border: 0.5px solid rgba(255,95,87,0.5); background: var(--red-dim); }
+  .tl-visa.over .tl-title { color: var(--red); }
 
   .tl-card { flex: 1; background: var(--surface); border: 0.5px solid var(--border); border-radius: var(--r); padding: 12px 14px; cursor: pointer; transition: border-color 0.15s; }
   .tl-card:hover { border-color: var(--border2); }
@@ -426,7 +439,7 @@
       <button type="button" class="btn btn-ghost btn-sm" id="ob-add-passport">+ another passport</button>
     </div>
     <div class="ob-section">
-      <h3>Travel permissions <span style="text-transform:none;color:var(--muted)">— residencies, long-stay visas (optional)</span></h3>
+      <h3>Travel permissions <span style="text-transform:none;color:var(--muted)">- residencies, long-stay visas (optional)</span></h3>
       <div id="ob-perms"></div>
       <button type="button" class="btn btn-ghost btn-sm" id="ob-add-perm">+ add permission</button>
     </div>
@@ -786,7 +799,7 @@ const CCY_NAME = {
   BAM:'Bosnia-Herzegovina Mark', RUB:'Russian Ruble', XOF:'West African CFA Franc',
   XAF:'Central African CFA Franc', XPF:'CFP Franc',
 };
-const ccyLabel = (c) => `${sym(c)} ${c}${CCY_NAME[c] ? ' — ' + CCY_NAME[c] : ''}`;
+const ccyLabel = (c) => `${sym(c)} ${c}${CCY_NAME[c] ? ' - ' + CCY_NAME[c] : ''}`;
 
 // Build <option>s for a currency select: the given trip's tagged-country
 // currencies first (as a group), then the rest.
@@ -881,7 +894,7 @@ async function geocode(q, country) {
     const res = await fetch(url, { signal: ctrl.signal });
     if (res.ok) {
       const j = await res.json();
-      if (j && j.lat != null) hit = { lat: j.lat, lng: j.lng, display_name: j.display_name };
+      if (j && j.lat != null) hit = { lat: j.lat, lng: j.lng, country: j.country || null, display_name: j.display_name };
     }
   } catch { /* leave null */ }
   finally { clearTimeout(t); }
@@ -897,21 +910,21 @@ async function geoForTransportEnd(text, mode) {
     if (iata) {
       const table = await loadAirports();
       const a = table[iata];
-      if (a) return { lat: a.lat, lng: a.lng, source: 'iata' };
+      if (a) return { lat: a.lat, lng: a.lng, country: a.country || null, source: 'iata' };
     }
   }
   const stationy = mode === 'bus' || mode === 'train' || mode === 'ferry';
   if (stationy) {
     const hit = await geocode(text + ' station');
-    if (hit) return { lat: hit.lat, lng: hit.lng, source: 'station' };
+    if (hit) return { lat: hit.lat, lng: hit.lng, country: hit.country, source: 'station' };
   } else {
     const hit = await geocode(text);
-    if (hit) return { lat: hit.lat, lng: hit.lng, source: 'city' };
+    if (hit) return { lat: hit.lat, lng: hit.lng, country: hit.country, source: 'city' };
   }
   const city = cityOnly(text);
   if (city && city !== text) {
     const hit = await geocode(city);
-    if (hit) return { lat: hit.lat, lng: hit.lng, source: 'city' };
+    if (hit) return { lat: hit.lat, lng: hit.lng, country: hit.country, source: 'city' };
   }
   return null;
 }
@@ -952,50 +965,108 @@ function nearestPlaceTag(stay, placeTags) {
   return nearestPlaceTagForPoint(stay.lat, stay.lng, placeTags) || placeTagForCity(stay.city, placeTags);
 }
 
-// Days actually planned in a country so far: the span from the earliest
-// known arrival there to the latest known departure, inclusive — not just
-// the sum of booked-stay nights, which undercounts the moment travel
-// continues past the last recorded stay (a flight out a few days after a
-// course ends is still time spent in that country). Arrival/departure come
-// from stays (start/end date) *and* transport legs whose resolved endpoint
-// lands in or leaves from this country. A country tagged as a destination
-// but with nothing planned there yet returns null ("not planned"), rather
-// than silently assuming the visit lasts the whole trip.
-function daysInCountry(cc, stays, transport, placeTags) {
-  let start = null, end = null, matched = false;
-  const extend = (ts, dir) => {
-    if (!ts) return;
-    const day = String(ts).slice(0, 10);
-    if (dir === 'start' && (!start || day < start)) start = day;
-    if (dir === 'end' && (!end || day > end)) end = day;
+// Which countries you're in on each day. A stay covers check-in through
+// check-out day; a leg puts its departure day in the origin country and
+// its arrival day in the destination. A border-crossing day counts for
+// both, as visa rules generally count any part of a day as a day.
+function countryDayMap(stays, transport, placeTags) {
+  const map = new Map();   // "YYYY-MM-DD" -> Set of country codes
+  const add = (day, cc) => {
+    if (!day || !cc) return;
+    if (!map.has(day)) map.set(day, new Set());
+    map.get(day).add(cc);
   };
+  // The country stored from geocoding is exact; the nearest trip
+  // destination is only a fallback and can be wrong right at a border.
   for (const s of (stays || [])) {
-    if (nearestPlaceTag(s, placeTags)?.country !== cc) continue;
-    matched = true;
-    extend(s.start_date, 'start');
-    extend(s.end_date || s.start_date, 'end');
+    const cc = s.country || nearestPlaceTag(s, placeTags)?.country;
+    if (!cc || !s.start_date) continue;
+    for (let d = s.start_date; d <= (s.end_date || s.start_date); d = addDaysStr(d, 1)) add(d, cc);
   }
   for (const t of (transport || [])) {
-    const into = nearestPlaceTagForPoint(t.dest_lat, t.dest_lng, placeTags);
-    const from = nearestPlaceTagForPoint(t.origin_lat, t.origin_lng, placeTags);
-    if (into?.country === cc) { matched = true; extend(t.arrival || t.departure, 'start'); }
-    if (from?.country === cc) { matched = true; extend(t.departure, 'end'); }
+    if (t.departure) add(localDayStr(new Date(t.departure)), t.origin_country || nearestPlaceTagForPoint(t.origin_lat, t.origin_lng, placeTags)?.country);
+    if (t.arrival || t.departure) add(localDayStr(new Date(t.arrival || t.departure)), t.dest_country || nearestPlaceTagForPoint(t.dest_lat, t.dest_lng, placeTags)?.country);
   }
-  if (!matched || !start || !end) return null;
-  return Math.round((toDay(end) - toDay(start)) / DAY_MS) + 1;
+  return map;
+}
+
+// Separate visits (entries) to a country: runs of days there, bridged
+// across unplanned days that don't put you anywhere else. Leaving and
+// coming back later is a new visit, so a per-entry limit starts again.
+function countryVisits(cc, stays, transport, placeTags) {
+  const map = countryDayMap(stays, transport, placeTags);
+  const days = [...map.keys()].filter(d => map.get(d).has(cc)).sort();
+  const visits = [];
+  for (const d of days) {
+    const last = visits.at(-1);
+    if (last) {
+      let bridge = true;
+      for (let x = addDaysStr(last.to, 1); x < d; x = addDaysStr(x, 1)) if (map.has(x)) { bridge = false; break; }
+      if (bridge) { last.to = d; continue; }
+    }
+    visits.push({ from: d, to: d });
+  }
+  visits.forEach(v => { v.days = nights(v.from, v.to) + 1; });
+  return visits;
+}
+
+// The visit that matters now: the one you're in (you count as still there
+// past the last booked day while nothing has taken you elsewhere), else
+// the next one, else the most recent. `elapsed` = today's day number in it.
+function relevantVisit(cc, stays, transport, placeTags) {
+  const today = localDayStr(new Date());
+  const vs = countryVisits(cc, stays, transport, placeTags);
+  const started = vs.filter(v => v.from <= today);
+  const cur = started.at(-1);
+  if (cur && (today <= cur.to || currentCountry(currentTrip) === cc))
+    return { ...cur, current: true, elapsed: nights(cur.from, today) + 1 };
+  return vs.find(v => v.from > today) || cur || null;
+}
+
+// Planned length of the relevant visit (null = nothing planned there yet).
+function daysInCountry(cc, stays, transport, placeTags) {
+  return relevantVisit(cc, stays, transport, placeTags)?.days ?? null;
+}
+
+// Last allowed day of each visit with a known limit: entry day + allowed
+// days - 1, or the visa's expiry if that comes first. `over` = planned days
+// past it.
+// Only deadlines worth a reminder: an overstay, or one inside the trip
+// that you haven't already planned to be gone by (you're there, or the
+// days up to it aren't planned yet).
+function visaDeadlines(trip) {
+  const out = [];
+  const map = countryDayMap(currentStays, currentTransport, trip?.place_tags);
+  const elsewhereBy = (cc, after, last) => {
+    for (let d = addDaysStr(after, 1); d <= last; d = addDaysStr(d, 1))
+      if (map.has(d) && !map.get(d).has(cc)) return true;
+    return false;
+  };
+  for (const cc of (trip?.country_codes || [])) {
+    const v = computeVisa(cc);
+    if (!v || v.days == null || v.status === 'resident') continue;
+    for (const visit of countryVisits(cc, currentStays, currentTransport, trip.place_tags)) {
+      let last = addDaysStr(visit.from, v.days - 1);
+      if (v.doc?.expires_on && v.doc.expires_on < last) last = v.doc.expires_on;
+      const over = Math.max(0, nights(last, visit.to));
+      if (!over && (!trip.end_date || last > trip.end_date || elsewhereBy(cc, visit.to, last))) continue;
+      out.push({ cc, last, visit, allowed: v.days, viaDoc: !!v.viaDocument, over });
+    }
+  }
+  return out;
 }
 
 async function geoForStay(stay, placeTags) {
   const country = (placeTagForCity(stay.city, placeTags)?.country || '').toLowerCase() || null;
   if (stay.address) {
     const hit = await geocode(stay.address, country);
-    if (hit) return { lat: hit.lat, lng: hit.lng, source: 'address' };
+    if (hit) return { lat: hit.lat, lng: hit.lng, country: hit.country, source: 'address' };
   }
   const tag = placeTagForCity(stay.city, placeTags);
-  if (tag && tag.lat != null) return { lat: tag.lat, lng: tag.lng, source: 'placetag' };
+  if (tag && tag.lat != null) return { lat: tag.lat, lng: tag.lng, country: tag.country || null, source: 'placetag' };
   if (stay.city) {
     const hit = await geocode(cityOnly(stay.city), country);
-    if (hit) return { lat: hit.lat, lng: hit.lng, source: 'city' };
+    if (hit) return { lat: hit.lat, lng: hit.lng, country: hit.country, source: 'city' };
   }
   return null;
 }
@@ -1157,15 +1228,20 @@ function tripMapData(stays, transport, current) {
 // pooled together), write them back, max ~4 concurrent. Used by the Trip
 // tab's mini-map backfill and by the full map view — a connecting flight's
 // layover leg that never got geocoded is exactly what this catches.
+const countryTried = new Set();
 async function backfillGeoRows(stays, transport, placeTags) {
   const jobs = [];
+  // Rows geocoded before countries were stored get one more lookup per
+  // session for their country (see countryDayMap).
+  const noCountry = (r) => !countryTried.has(r.id) && countryTried.add(r.id);
   for (const s of (stays || [])) {
-    if (s.lat == null && (s.address || s.city) && s.geo_source !== 'manual')
+    if ((s.lat == null || (!s.country && noCountry(s))) && (s.address || s.city) && s.geo_source !== 'manual')
       jobs.push(() => resolveStayGeoAwait(s, placeTags));
   }
   for (const t of (transport || [])) {
-    const needsO = t.origin_lat == null && t.origin;
-    const needsD = t.dest_lat == null && t.destination;
+    const retry = !(t.origin_country && t.dest_country) && noCountry(t);
+    const needsO = (t.origin_lat == null || retry) && t.origin;
+    const needsD = (t.dest_lat == null || retry) && t.destination;
     if ((needsO || needsD) && t.geo_source !== 'manual')
       jobs.push(() => resolveTransportGeoAwait(t));
   }
@@ -1202,6 +1278,8 @@ async function resolveStayGeoAwait(row, placeTags = currentTrip?.place_tags) {
   if (!g) return;
   row.lat = g.lat; row.lng = g.lng; row.geo_source = g.source;
   await sb.from('stays').update({ lat: g.lat, lng: g.lng, geo_source: g.source }).eq('id', row.id);
+  // Separate write: fails harmlessly until the `country` column exists.
+  if (g.country) { row.country = g.country; await sb.from('stays').update({ country: g.country }).eq('id', row.id); }
 }
 async function resolveTransportGeoAwait(row) {
   if (!row?.id || row.geo_source === 'manual') return;
@@ -1217,6 +1295,11 @@ async function resolveTransportGeoAwait(row) {
   patch.geo_source = (o && d) ? (o.source === 'iata' || d.source === 'iata' ? 'iata' : o.source) : 'partial';
   Object.assign(row, patch);
   await sb.from('transport').update(patch).eq('id', row.id);
+  // Separate write: fails harmlessly until the country columns exist.
+  const cc = {};
+  if (o?.country) cc.origin_country = o.country;
+  if (d?.country) cc.dest_country = d.country;
+  if (Object.keys(cc).length) { Object.assign(row, cc); await sb.from('transport').update(cc).eq('id', row.id); }
 }
 
 function renderCurrentStatus() {
@@ -1578,7 +1661,7 @@ function tripCardHTML(t) {
   const base = t.base_currency || 'EUR';
   const days = tripDays(t.start_date, t.end_date);
   const dates = t.start_date
-    ? `${fmtDateY(t.start_date)} – ${fmtDateY(t.end_date)}${days ? ` · ${days} day${days === 1 ? '' : 's'}` : ''}`
+    ? `${fmtDateY(t.start_date)} - ${fmtDateY(t.end_date)}${days ? ` · ${days} day${days === 1 ? '' : 's'}` : ''}`
     : '';
   const current = overviewCurrent[t.id];
   return `<div class="trip-card" data-trip="${t.id}">
@@ -1700,7 +1783,7 @@ async function openTrip(tripId) {
   currentDocs = docs || [];
 
   $('detail-name').textContent = trip?.name || 'Trip';
-  const dateRange = trip ? `${fmtDate(trip.start_date)} – ${fmtDate(trip.end_date)}`.trim() : '';
+  const dateRange = trip ? `${fmtDate(trip.start_date)} - ${fmtDate(trip.end_date)}`.trim() : '';
   $('detail-sub').innerHTML = trip
     ? `${placeTagsHTML(trip.place_tags, trip.destination)}<div style="margin-top:4px">${esc(dateRange)}<button class="details-btn" onclick="openTripDetails()">details</button></div>`
     : '';
@@ -1709,6 +1792,7 @@ async function openTrip(tripId) {
   // the first paint instead of the raw text, then flipping a moment later.
   if (currentTransport.some(t => (t.type || '').toLowerCase() === 'flight')) await loadAirports();
 
+  await loadVisaData();   // the timeline's visa deadlines need the rules
   renderVisaHeader(trip);
   renderTripProgress();
   renderTimeline(currentStays, currentTransport, currentActivities);
@@ -1954,11 +2038,11 @@ const VISA_TONE = { 'visa free': 'green', 'visa on arrival': 'green', 'eta': 'am
 // What each status means + how you obtain it. The dataset only gives
 // status + days; this is the fixed explanation layer.
 const VISA_EXPLAIN = {
-  'visa free': { how: 'No visa or pre-authorisation needed for a tourist stay. Carry a passport valid for the whole trip (many countries want 3–6 months beyond your exit) and proof of onward travel.' },
-  'visa on arrival': { how: 'A visa is issued at the border on arrival — usually a short queue, a fee in cash, and a passport photo. Check the current fee and accepted currency before you fly.' },
-  'eta': { how: 'An Electronic Travel Authorisation — applied for online days before travel, linked to your passport, approved by email. This is the ESTA (USA), eTA (Canada), ETA (Australia), and ETIAS (Europe) family. Apply only on the official government site.' },
-  'e-visa': { how: 'An electronic visa — an online application with documents and a fee, processed in days to weeks, sent as a PDF you print. Apply well before travel, only on the official government portal (many lookalike sites charge extra).' },
-  'visa required': { how: 'A visa must be obtained in advance, usually at an embassy/consulate or an accredited visa centre: an application form, photos, a fee, often proof of funds, accommodation and onward travel, and sometimes an interview. Start 4–8 weeks ahead.' },
+  'visa free': { how: 'No visa or pre-authorisation needed for a tourist stay. Carry a passport valid for the whole trip (many countries want 3-6 months beyond your exit) and proof of onward travel.' },
+  'visa on arrival': { how: 'A visa is issued at the border on arrival - usually a short queue, a fee in cash, and a passport photo. Check the current fee and accepted currency before you fly.' },
+  'eta': { how: 'An Electronic Travel Authorisation - applied for online days before travel, linked to your passport, approved by email. This is the ESTA (USA), eTA (Canada), ETA (Australia), and ETIAS (Europe) family. Apply only on the official government site.' },
+  'e-visa': { how: 'An electronic visa - an online application with documents and a fee, processed in days to weeks, sent as a PDF you print. Apply well before travel, only on the official government portal (many lookalike sites charge extra).' },
+  'visa required': { how: 'A visa must be obtained in advance, usually at an embassy/consulate or an accredited visa centre: an application form, photos, a fee, often proof of funds, accommodation and onward travel, and sometimes an interview. Start 4-8 weeks ahead.' },
   'no admission': { how: 'Entry is generally not permitted on this passport, or there are exceptional restrictions (sanctions, conflict, closed border). Check official government travel advice before making any plans.' },
 };
 
@@ -2013,7 +2097,7 @@ function visaPortal(cc, status, citizenName) {
   const known = VISA_PORTAL[`${cc}|${status}`];
   if (known) return { url: known, label: 'official application portal ↗' };
   // ETIAS covers most of Europe for eta
-  if (status === 'eta' && EU_SCHENGEN.has(cc)) return { url: 'https://travel-europe.europa.eu/etias_en', label: 'ETIAS — official portal ↗' };
+  if (status === 'eta' && EU_SCHENGEN.has(cc)) return { url: 'https://travel-europe.europa.eu/etias_en', label: 'ETIAS - official portal ↗' };
   return {
     url: 'https://www.google.com/search?q=' + encodeURIComponent(`${COUNTRY_NAME[cc] || cc} ${status === 'e-visa' ? 'e-visa' : status === 'eta' ? 'electronic travel authorisation' : 'visa'} official application ${citizenName} citizens`),
     label: 'find the official site ↗',
@@ -2174,7 +2258,7 @@ async function renderVisaHeader(trip) {
   const el = $('visa-header');
   const ccs = (trip?.country_codes || []);
   if (!ccs.length || !(currentProfile?.citizenships || []).length) {
-    el.innerHTML = `<div class="esta-label" style="text-align:right">visa — set citizenship &amp; destination</div>`;
+    el.innerHTML = `<div class="esta-label" style="text-align:right">visa - set citizenship &amp; destination</div>`;
     return;
   }
   // The country you're in right now, if it's one of the trip's; otherwise
@@ -2191,13 +2275,17 @@ async function renderVisaHeader(trip) {
 
   // Days actually planned in that specific country so far (not the whole
   // trip's span — a multi-country trip isn't spent entirely in one place).
-  const ccDays = daysInCountry(worst.cc, currentStays, currentTransport, trip?.place_tags);
+  // While you're in the country: today's day number in this visit.
+  // Otherwise: how long the next (or last) visit is planned to be.
+  const visit = relevantVisit(worst.cc, currentStays, currentTransport, trip?.place_tags);
   let bar = '';
-  if (worst.days != null && ccDays != null) {
-    const pct = Math.min((ccDays / worst.days) * 100, 100);
-    const tone = ccDays >= worst.days ? 'red' : (ccDays >= worst.days * 0.8 ? 'amber' : 'green');
+  if (worst.days != null && visit) {
+    const shown = visit.current ? visit.elapsed : visit.days;
+    const pct = Math.min((shown / worst.days) * 100, 100);
+    const over = visit.days > worst.days || shown > worst.days;
+    const tone = over ? 'red' : (shown >= worst.days * 0.8 ? 'amber' : 'green');
     bar = `<div class="esta-bar-wrap"><div class="esta-bar ${tone === 'red' ? 'danger' : tone === 'amber' ? 'warn' : ''}" style="width:${pct}%"></div></div>
-           <div class="esta-label" style="text-align:right">${ccDays} / ${worst.days} days</div>`;
+           <div class="esta-label" style="text-align:right">${visit.current ? `day ${shown} / ${worst.days}` : `${shown} / ${worst.days} days planned`}</div>`;
   }
   el.innerHTML = `<span class="visa-badge vb-${worst.tone}">${esc(worst.label)}</span>
     <div class="esta-label" style="text-align:right;margin-top:3px">${flagEmoji(worst.cc)} ${esc(COUNTRY_NAME[worst.cc] || worst.cc)}</div>
@@ -2231,6 +2319,7 @@ function pastFoldedCutoff() {
 // Last local day a timeline item covers.
 function itemEndDay(kind, d) {
   if (kind === 'gap') return addDaysStr(d.to, -1);   // last unplanned night
+  if (kind === 'visa') return d.last;
   if (kind === 'stay') return d.end_date || d.start_date;
   if (kind === 'activity') return localDayStr(new Date(d.end_at || d.start_at));
   return localDayStr(new Date(d.arrival || d.departure));
@@ -2408,7 +2497,7 @@ function openTripDetails() {
   $('modal').innerHTML = `
     <div class="modal-box">
       <h2>${esc(trip.name || 'Trip')}</h2>
-      <div class="mb-sub">${esc(fmtDateY(trip.start_date))} – ${esc(fmtDateY(trip.end_date))}</div>
+      <div class="mb-sub">${esc(fmtDateY(trip.start_date))} - ${esc(fmtDateY(trip.end_date))}</div>
       ${sections.join('')}
       <div class="modal-actions"><span></span><div class="right">
         <button type="button" class="btn btn-ghost btn-sm" onclick="closeModal()">close</button>
@@ -2457,6 +2546,8 @@ function renderTimeline(stays, transport, activities = []) {
     // Sorted just before a stay that starts the same day would be.
     ...unplannedNights(currentTrip, stays, transport)
       .map(g => ({ kind: 'gap', when: g.from + 'T23:59:58', data: g })),
+    // Start of the last allowed day, so it reads before that day's travel.
+    ...visaDeadlines(currentTrip).map(d => ({ kind: 'visa', when: d.last + 'T00:00:01', data: d })),
     ...transport.map(t => ({ kind: 'transport', when: t.departure, data: t })),
     ...activities.map(a => ({ kind: 'activity', when: a.start_at, data: a })),
     // A stay only has a date, not a time, for when it starts — checking in
@@ -2497,6 +2588,25 @@ function renderTimeline(stays, transport, activities = []) {
       }
     }
 
+    if (item.kind === 'visa') {
+      const v = item.data;
+      const name = COUNTRY_NAME[v.cc] || v.cc;
+      const title = v.over
+        ? `${flagEmoji(v.cc)} Overstay - ${v.over} day${v.over === 1 ? '' : 's'} past your ${name} visa`
+        : `${flagEmoji(v.cc)} ${name} visa - last day`;
+      const sub = v.over
+        ? `last allowed day ${fmtDate(v.last)} · planned until ${fmtDate(v.visit.to)}`
+        : `${v.allowed} days from ${fmtDate(v.visit.from)} · leave by ${fmtDate(v.last)}`;
+      tl.insertAdjacentHTML('beforeend', `
+        <div class="tl-item" style="animation-delay:${delay}s">
+          <div class="tl-dot-wrap"><div class="tl-dot visa${v.over ? ' over' : ''}"></div></div>
+          <div class="tl-card tl-visa${v.over ? ' over' : ''}">
+            <div class="tl-title" style="margin-top:0">${esc(title)}</div>
+            <div class="tl-sub">${esc(sub)}</div>
+          </div>
+        </div>`);
+      return;
+    }
     if (item.kind === 'gap') {
       const g = item.data;
       tl.insertAdjacentHTML('beforeend', `
@@ -2505,11 +2615,15 @@ function renderTimeline(stays, transport, activities = []) {
           <div class="tl-card tl-gap">
             <div class="tl-gap-row">
               <div>
-                <div class="tl-title" style="margin-top:0">${g.n} day${g.n === 1 ? '' : 's'} — where?</div>
-                <div class="tl-sub">${esc(fmtDate(g.from))} – ${esc(fmtDate(g.to))} · no stay booked</div>
+                <div class="tl-title" style="margin-top:0">${g.n} day${g.n === 1 ? '' : 's'} - where?</div>
+                <div class="tl-sub">${esc(fmtDate(g.from))} - ${esc(fmtDate(g.to))} · no stay booked</div>
               </div>
-              <button class="btn btn-ghost btn-sm" onclick="addStayForGap('${g.from}','${g.to}')">+ stay</button>
+              <div class="tl-gap-actions">
+                <button class="btn btn-ghost btn-sm" onclick="editGapNote(this,'${g.from}','${g.to}')">${gapNote(g) ? 'edit note' : 'note'}</button>
+                <button class="btn btn-ghost btn-sm" onclick="addStayForGap('${g.from}','${g.to}')">+ stay</button>
+              </div>
             </div>
+            ${gapNote(g) ? `<div class="tl-gap-note">${esc(gapNote(g))}</div>` : ''}
           </div>
         </div>`);
       return;
@@ -2572,7 +2686,7 @@ function renderTimeline(stays, transport, activities = []) {
           <div class="tl-card" onclick="toggleCard(this)">
             <div class="tl-card-header">
               <span class="tl-type-pill pill-stay">${esc(s.type || 'stay')}</span>
-              <span class="tl-date">${esc(fmtDate(s.start_date))} – ${esc(fmtDate(s.end_date))}</span>
+              <span class="tl-date">${esc(fmtDate(s.start_date))} - ${esc(fmtDate(s.end_date))}</span>
             </div>
             <div class="tl-title">${esc(titleText)}</div>
             <div class="tl-sub">${esc(subText)}</div>
@@ -2625,7 +2739,7 @@ function renderStays(stays) {
     const n = nights(s.start_date, s.end_date);
     const rows = [
       s.host_name && `<div class="detail-row"><span class="detail-label">Host</span><span class="detail-value">${esc(s.host_name)}</span></div>`,
-      `<div class="detail-row"><span class="detail-label">Dates</span><span class="detail-value">${esc(fmtDateY(s.start_date))} – ${esc(fmtDateY(s.end_date))}</span></div>`,
+      `<div class="detail-row"><span class="detail-label">Dates</span><span class="detail-value">${esc(fmtDateY(s.start_date))} - ${esc(fmtDateY(s.end_date))}</span></div>`,
       s.address && `<div class="detail-row"><span class="detail-label">Address</span><span class="detail-value"><a href="https://maps.google.com/?q=${encodeURIComponent(s.address)}" target="_blank">${esc(s.address)} ↗</a></span></div>`,
       s.pets && `<div class="detail-row"><span class="detail-label">Pets</span><span class="detail-value">${esc(s.pets)}</span></div>`,
       s.price != null && `<div class="detail-row"><span class="detail-label">Price</span><span class="detail-value" style="display:flex;align-items:center;gap:8px">${Number(s.price) === 0 ? 'unpaid' : money(Number(s.price))} ${currencyPicker(s.currency || 'EUR', 'setStayCurrency', s.id)}</span></div>`,
@@ -2634,7 +2748,7 @@ function renderStays(stays) {
     ].filter(Boolean).join('');
     return `<div class="info-card" onclick="toggleCard(this)">
       <div class="ic-header">
-        <div><div class="ic-city">${esc(s.city || '')}</div><div class="ic-dates">${esc(fmtDate(s.start_date))} – ${esc(fmtDate(s.end_date))}${n != null ? ' · ' + n + ' night' + (n === 1 ? '' : 's') : ''}</div></div>
+        <div><div class="ic-city">${esc(s.city || '')}</div><div class="ic-dates">${esc(fmtDate(s.start_date))} - ${esc(fmtDate(s.end_date))}${n != null ? ' · ' + n + ' night' + (n === 1 ? '' : 's') : ''}</div></div>
         <span class="ic-tag">${esc(s.type || 'stay')}</span>
       </div>
       <div class="ic-details">${rows}
@@ -2687,7 +2801,7 @@ function renderTransport(transport) {
 // One card shape for an activity, used both on the timeline ('tl') and in
 // the Activities tab ('ic').
 function activityCardHTML(a, variant) {
-  const when = a.end_at ? `${fmtDT(a.start_at)} – ${fmtDT(a.end_at)}` : fmtDT(a.start_at);
+  const when = a.end_at ? `${fmtDT(a.start_at)} - ${fmtDT(a.end_at)}` : fmtDT(a.start_at);
   const rows = [
     a.booking_code && `<div class="detail-row"><span class="detail-label">Booking</span><span class="detail-value" style="display:flex;align-items:center;gap:6px">${esc(a.booking_code)} <button class="copy-btn" onclick="event.stopPropagation();copyText('${esc(String(a.booking_code).replace(/\s/g,''))}',this)">copy</button></span></div>`,
     a.organiser && `<div class="detail-row"><span class="detail-label">Organiser</span><span class="detail-value">${esc(a.organiser)}</span></div>`,
@@ -2745,34 +2859,34 @@ async function renderVisa(docs, trip) {
     const complianceTrips = await loadAllTripsForCompliance();
     const asOfDate = trip?.end_date || trip?.start_date || new Date().toISOString().slice(0, 10);
 
-    guidance = `<div class="section-label" style="margin-top:0">Entry — travelling on ${flagEmoji(primary)} ${esc(COUNTRY_NAME[primary] || primary)}${cits.length > 1 ? ` (+${cits.length - 1})` : ''}</div>` +
+    guidance = `<div class="section-label" style="margin-top:0">Entry - travelling on ${flagEmoji(primary)} ${esc(COUNTRY_NAME[primary] || primary)}${cits.length > 1 ? ` (+${cits.length - 1})` : ''}</div>` +
       ccs.map(cc => {
         const v = computeVisa(cc);
-        if (!v) return `<div class="visa-block"><div class="vb-country">${flagEmoji(cc)} ${esc(COUNTRY_NAME[cc] || cc)}</div><div class="vb-line">No data for this destination — check the official government site.</div></div>`;
+        if (!v) return `<div class="visa-block"><div class="vb-country">${flagEmoji(cc)} ${esc(COUNTRY_NAME[cc] || cc)}</div><div class="vb-line">No data for this destination - check the official government site.</div></div>`;
         // Days actually planned in *this* country so far — not the whole
         // trip's span, which would wrongly assume a multi-country trip is
         // spent entirely in each tagged country (false alarms on the ones
         // you're only passing through, false reassurance on the rest).
         const ccDays = daysInCountry(cc, currentStays, currentTransport, trip?.place_tags);
-        const notPlannedNote = `<div class="vb-line">No stays added for ${esc(COUNTRY_NAME[cc] || cc)} yet — add them here to check the actual length of this visit against the limit.</div>`;
+        const notPlannedNote = `<div class="vb-line">No stays added for ${esc(COUNTRY_NAME[cc] || cc)} yet - add them here to check the actual length of this visit against the limit.</div>`;
         let bar = '';
         if (v.days != null) {
           const label = v.viaDocument ? 'Allowed stay (your visa)' : 'Max visa-free stay';
           if (ccDays != null) {
             const pct = Math.min((ccDays / v.days) * 100, 100);
-            const tone = ccDays >= v.days ? 'vb-red' : (ccDays >= v.days * 0.8 ? 'vb-amber' : 'vb-green');
+            const tone = ccDays > v.days ? 'vb-red' : (ccDays >= v.days * 0.8 ? 'vb-amber' : 'vb-green');
             const barColor = tone === 'vb-red' ? 'var(--red)' : tone === 'vb-amber' ? 'var(--amber)' : 'var(--green)';
             bar = `<div class="vb-line">${label}: <b>${v.days} days</b></div>
               <div class="vb-line">Planned so far: ${ccDays} days
                 <div class="vb-bar-wrap"><div class="vb-bar" style="width:${pct}%;background:${barColor}"></div></div>
-                ${ccDays >= v.days ? `<b style="color:var(--red)">exceeds ${v.viaDocument ? 'your visa\'s' : 'the visa-free'} limit</b>` : ccDays >= v.days * 0.8 ? '<span style="color:var(--amber)">close to the limit</span>' : 'well within'}
+                ${ccDays > v.days ? `<b style="color:var(--red)">exceeds ${v.viaDocument ? 'your visa\'s' : 'the visa-free'} limit</b>` : ccDays >= v.days * 0.8 ? '<span style="color:var(--amber)">close to the limit</span>' : 'well within'}
               </div>`;
           } else {
             bar = `<div class="vb-line">${label}: <b>${v.days} days</b></div>${notPlannedNote}`;
           }
         } else if (v.viaDocument) {
           bar = ccDays != null
-            ? `<div class="vb-line">Planned so far: ${ccDays} days — add the allowed stay length on your visa document to check it against this trip.</div>`
+            ? `<div class="vb-line">Planned so far: ${ccDays} days - add the allowed stay length on your visa document to check it against this trip.</div>`
             : notPlannedNote;
         }
 
@@ -2826,14 +2940,14 @@ async function renderVisa(docs, trip) {
         return `<div class="visa-block info-card" onclick="toggleCard(this)" style="cursor:pointer">
           <div class="vb-country">${flagEmoji(cc)} ${esc(COUNTRY_NAME[cc] || cc)}
             <span class="visa-badge vb-${v.tone}">${esc(v.label)}</span></div>
-          ${v.viaPermission ? `<div class="vb-line">You hold <b>${esc(v.label)}</b> — the visa rules below may not apply to you.</div>` : ''}
+          ${v.viaPermission ? `<div class="vb-line">You hold <b>${esc(v.label)}</b> - the visa rules below may not apply to you.</div>` : ''}
           ${passportNote}
           ${bar}
           ${annualBar}
           <div class="ic-details">
             ${docSummary}
             ${explain ? `<div class="vb-line">${esc(explain.how)}</div>` : ''}
-            ${options ? `<div class="vb-line">Options at the border: ${options.map(o => `<b>${o.days} days</b> (${esc(o.fee)})`).join(' · ')} — multiple-entry rates, confirm current fees officially.</div>` : ''}
+            ${options ? `<div class="vb-line">Options at the border: ${options.map(o => `<b>${o.days} days</b> (${esc(o.fee)})`).join(' · ')} - multiple-entry rates, confirm current fees officially.</div>` : ''}
             ${v.days != null ? `<div class="vb-line">Permitted stay on this basis: <b>${v.days} days</b> per entry.</div>` : ''}
             ${portal ? `<div class="vb-line"><a href="${portal.url}" target="_blank" rel="noopener">${portal.label}</a></div>` : ''}
             <div class="vb-line"><a href="https://www.google.com/search?q=${encodeURIComponent((COUNTRY_NAME[cc] || cc) + ' entry requirements ' + primaryName + ' citizens official government')}" target="_blank" rel="noopener">full official requirements ↗</a></div>
@@ -2881,8 +2995,8 @@ async function renderVisa(docs, trip) {
     // travel, so flag inside that window, not just once actually expired.
     const passportWarn = d.doc_type === 'Passport' && d.expires_on ? (() => {
       const left = Math.round((toDay(d.expires_on) - toDay(new Date().toISOString().slice(0, 10))) / DAY_MS);
-      if (left < 0) return { tone: 'var(--red)', text: `expired ${Math.abs(left)} days ago — renew before travelling` };
-      if (left <= 180) return { tone: 'var(--amber)', text: `expires in ${left} days — many countries require 3–6 months' validity beyond your travel dates` };
+      if (left < 0) return { tone: 'var(--red)', text: `expired ${Math.abs(left)} days ago - renew before travelling` };
+      if (left <= 180) return { tone: 'var(--amber)', text: `expires in ${left} days - many countries require 3-6 months' validity beyond your travel dates` };
       return null;
     })() : null;
     const rows = [
@@ -2912,7 +3026,7 @@ async function renderVisa(docs, trip) {
   el.innerHTML = `
     ${guidance}
     <div class="visa-disclaimer">
-      Guidance only, from a community-maintained dataset${esc(asOf)}. Visa rules change —
+      Guidance only, from a community-maintained dataset${esc(asOf)}. Visa rules change -
       always confirm entry requirements on the destination's official government website
       before you book or travel.
     </div>
@@ -2964,7 +3078,7 @@ function fieldInner(f, val) {
     } else {
       opts = f.options.map(opt).join('');
     }
-    return `<div class="field"><label>${esc(f.label)}</label><select data-key="${f.key}">${f.required ? '' : '<option value="">—</option>'}${opts}</select></div>`;
+    return `<div class="field"><label>${esc(f.label)}</label><select data-key="${f.key}">${f.required ? '' : '<option value="">-</option>'}${opts}</select></div>`;
   }
   const inputType = f.type === 'datetime' ? 'datetime-local' : (f.type === 'date' ? 'date' : (f.type === 'number' ? 'number' : 'text'));
   let iv = v;
@@ -3074,7 +3188,7 @@ function openForm(opts) {
   const attachBlock = attach ? `
     <div class="field">
       <label>Tickets / QR codes / documents</label>
-      <div class="attach-box" id="attach-trigger">add image(s) — fields auto-fill from the first</div>
+      <div class="attach-box" id="attach-trigger">add image(s) - fields auto-fill from the first</div>
       <input type="file" id="attach-input" accept="image/*" multiple class="hidden">
       <div class="attach-gallery" id="attach-gallery"></div>
       <label style="flex-direction:row;gap:6px;align-items:center;margin-top:8px;text-transform:none">
@@ -3197,15 +3311,15 @@ function openForm(opts) {
       console.log('parse-ticket →', fields);
       const filled = fillFormFromParsed(fields);
       if (filled) {
-        $('attach-parsenote').textContent = 'fields filled — check them before saving';
+        $('attach-parsenote').textContent = 'fields filled - check them before saving';
       } else {
         // show what the model saw so the user can copy from it
         $('attach-parsenote').innerHTML =
-          `couldn't map fields automatically — enter them manually` +
+          `couldn't map fields automatically - enter them manually` +
           (raw ? `<br><span style="color:var(--faint)">read: ${esc(String(raw).slice(0, 200))}</span>` : '');
       }
     } catch (err) {
-      $('attach-parsenote').textContent = 'parsing failed (' + (err.message || 'error') + ') — enter fields manually';
+      $('attach-parsenote').textContent = 'parsing failed (' + (err.message || 'error') + ') - enter fields manually';
     }
   };
 
@@ -3242,7 +3356,7 @@ function openForm(opts) {
       }
 
       // For every other field: don't clobber something already filled in.
-      if (el.value && el.value !== '—') continue;
+      if (el.value && el.value !== '-') continue;
       if (el.type === 'datetime-local') el.value = toLocalDatetimeInputValue(val);
       else if (el.type === 'date') el.value = String(val).slice(0, 10);
       else el.value = val;
@@ -3259,7 +3373,7 @@ function openForm(opts) {
     if (attach && files.length) { newFiles.push(...files); renderGallery(); }
     if (fields && fillFormFromParsed(fields) && attach) {
       $('attach-parsenote').classList.remove('hidden');
-      $('attach-parsenote').textContent = 'fields filled — check them before saving';
+      $('attach-parsenote').textContent = 'fields filled - check them before saving';
     }
   }
 
@@ -3360,7 +3474,7 @@ async function parseTicket(files, kind) {
     // transient overload/rate-limit (already retried server-side once per
     // model before giving up), say so plainly instead.
     const status = j.detail && typeof j.detail === 'object' ? j.detail.status : null;
-    if (status === 503 || status === 429) throw new Error('Gemini is temporarily overloaded — try again in a moment');
+    if (status === 503 || status === 429) throw new Error('Gemini is temporarily overloaded - try again in a moment');
     const d = j.detail ? (typeof j.detail === 'string' ? j.detail : JSON.stringify(j.detail)) : '';
     throw new Error((j.error || 'parse failed') + (d ? ': ' + d.slice(0, 120) : ''));
   }
@@ -3454,7 +3568,7 @@ const DOC_FIELDS = [
   { key: 'doc_type', label: 'Type', type: 'select', options: ['ESTA', 'Visa', 'Global Entry', 'Passport', 'Vaccination', 'Insurance', 'other'] },
   { key: 'country', label: 'Country', type: 'text' },
   { key: 'status', label: 'Status', type: 'text' },
-  { key: 'max_stay_days', label: 'Allowed stay (days) — overrides the visa-free limit on the entry tab', type: 'number', showIf: { field: 'doc_type', in: ['Visa'] } },
+  { key: 'max_stay_days', label: 'Allowed stay (days) - overrides the visa-free limit on the entry tab', type: 'number', showIf: { field: 'doc_type', in: ['Visa'] } },
   { key: 'annual_cap_days', label: 'Max days per calendar year (if the visa states one, e.g. 180)', type: 'number', showIf: { field: 'doc_type', in: ['Visa'] } },
   { key: 'price', label: 'Cost', type: 'number', half: true },
   { key: 'currency', label: 'Currency', type: 'currency', half: true },
@@ -3548,7 +3662,7 @@ function wireNewTag(sel, category) {
       // close() ran via the change handler; leave a note where the panel was
       const note = document.createElement('div');
       note.className = 'parse-note'; note.style.margin = '-4px 0 12px';
-      note.textContent = `“${value}” saved as a ${label} tag — it'll be there when you add a ${label}`;
+      note.textContent = `“${value}” saved as a ${label} tag - it'll be there when you add a ${label}`;
       panel.after(note); setTimeout(() => note.remove(), 6000);
     }
   };
@@ -3678,7 +3792,7 @@ function addTravelItem() {
   $('modal').innerHTML = `
     <div class="modal-box">
       <h2>Add travel item</h2>
-      <div class="mb-sub">upload a ticket or booking and it's sorted for you — or pick a category</div>
+      <div class="mb-sub">upload a ticket or booking and it's sorted for you - or pick a category</div>
       <div class="field">
         <div class="attach-box" id="add-upload">upload ticket / booking / screenshot</div>
         <input type="file" id="add-upload-input" accept="image/*" multiple class="hidden">
@@ -3709,9 +3823,9 @@ function addTravelItem() {
       const res = await parseTicket(files.slice(0, 4), 'auto');
       fields = res.fields;
       if (res.category) { open(res.category); return; }
-      note.textContent = "couldn't tell what this is — pick a category and it'll be attached";
+      note.textContent = "couldn't tell what this is - pick a category and it'll be attached";
     } catch (err) {
-      note.textContent = 'reading failed (' + (err.message || 'error') + ') — pick a category and it\'ll be attached';
+      note.textContent = 'reading failed (' + (err.message || 'error') + ') - pick a category and it\'ll be attached';
     }
   };
 }
@@ -3721,6 +3835,41 @@ window.stayForm = stayForm; window.transportForm = transportForm; window.docForm
 window.editStay = (id) => stayForm(currentStays.find(x => x.id === id));
 window.editTransport = (id) => transportForm(currentTransport.find(x => x.id === id));
 window.editDoc = (id) => docForm(currentDocs.find(x => x.id === id));
+// Brainstorm notes for unplanned days, kept on the trip keyed by day. A
+// gap shows every note that falls inside it, so a note survives the gap
+// shrinking around it; saving folds them into one note on the gap's first day.
+const gapNotesIn = (g) => Object.entries(currentTrip?.gap_notes || {})
+  .filter(([day, text]) => day >= g.from && day < g.to && text).sort(([a], [b]) => a.localeCompare(b));
+const gapNote = (g) => gapNotesIn(g).map(([, text]) => text).join('\n\n');
+window.editGapNote = (btn, from, to) => {
+  const card = btn.closest('.tl-gap');
+  if (card.querySelector('.tl-gap-editor')) return;
+  const g = { from, to };
+  card.querySelector('.tl-gap-note')?.remove();
+  card.insertAdjacentHTML('beforeend', `
+    <div class="tl-gap-editor">
+      <textarea rows="4" placeholder="ideas, places, people to ask…">${esc(gapNote(g))}</textarea>
+      <div class="nt-actions">
+        <span class="nt-msg"></span>
+        <button type="button" class="btn btn-ghost btn-sm" data-act="cancel">cancel</button>
+        <button type="button" class="btn btn-green btn-sm" data-act="save">save</button>
+      </div>
+    </div>`);
+  const ed = card.querySelector('.tl-gap-editor');
+  const ta = ed.querySelector('textarea');
+  ta.focus();
+  ed.querySelector('[data-act="cancel"]').onclick = () => renderTimeline(currentStays, currentTransport, currentActivities);
+  ed.querySelector('[data-act="save"]').onclick = async () => {
+    const notes = { ...(currentTrip.gap_notes || {}) };
+    for (const [day] of gapNotesIn(g)) delete notes[day];
+    const text = ta.value.trim();
+    if (text) notes[from] = text;
+    const { error } = await sb.from('trips').update({ gap_notes: notes }).eq('id', currentTrip.id);
+    if (error) { ed.querySelector('.nt-msg').textContent = error.message; return; }
+    currentTrip.gap_notes = notes;
+    renderTimeline(currentStays, currentTransport, currentActivities);
+  };
+};
 window.addStayForGap = (from, to) => stayForm(null, undefined, { start_date: from, end_date: to });
 window.editActivity = (id) => activityForm(currentActivities.find(x => x.id === id));
 
