@@ -1031,6 +1031,27 @@ function daysInCountry(cc, stays, transport, placeTags) {
 // Last allowed day of each visit with a known limit: entry day + allowed
 // days - 1, or the visa's expiry if that comes first. `over` = planned days
 // past it.
+// "Before you fly" for each upcoming entry into a country we have a guide
+// for (and no approved visa on file): the prep tip, plus which visa to get
+// when the default one is too short for the plan. Shown on the entry day,
+// ahead of that day's travel.
+function visaPrep(trip) {
+  const today = localDayStr(new Date());
+  const out = [];
+  for (const cc of (trip?.country_codes || [])) {
+    const g = VISA_GUIDE[cc];
+    if (!g) continue;
+    for (const visit of countryVisits(cc, currentStays, currentTransport, trip.place_tags)) {
+      if (visit.from < today) continue;
+      const v = visaFor(cc, visit.days);
+      if (!v || v.viaDocument || v.status === 'resident' || v.status === 'visa free') continue;
+      out.push({ cc, day: visit.from, visit, guide: g, route: v.needsMore ? v.route : null, tooLong: !!v.tooLong, baseDays: v.baseDays,
+        prep: v.route?.prep || g.prep });
+    }
+  }
+  return out;
+}
+
 // Only deadlines worth a reminder: an overstay, or one inside the trip
 // that you haven't already planned to be gone by (you're there, or the
 // days up to it aren't planned yet).
@@ -1043,14 +1064,19 @@ function visaDeadlines(trip) {
     return false;
   };
   for (const cc of (trip?.country_codes || [])) {
-    const v = computeVisa(cc);
-    if (!v || v.days == null || v.status === 'resident') continue;
     for (const visit of countryVisits(cc, currentStays, currentTransport, trip.place_tags)) {
+      const v = visaFor(cc, visit.days);
+      if (!v || v.days == null || v.status === 'resident') continue;
+      // A route with an extension: remind on the day the first part runs out.
+      if (v.route?.extendDays && visit.days > v.route.days) {
+        const extendBy = addDaysStr(visit.from, v.route.days - 1);
+        out.push({ cc, last: extendBy, visit, allowed: v.route.days, extend: v.route, over: 0 });
+      }
       let last = addDaysStr(visit.from, v.days - 1);
       if (v.doc?.expires_on && v.doc.expires_on < last) last = v.doc.expires_on;
       const over = Math.max(0, nights(last, visit.to));
       if (!over && (!trip.end_date || last > trip.end_date || elsewhereBy(cc, visit.to, last))) continue;
-      out.push({ cc, last, visit, allowed: v.days, viaDoc: !!v.viaDocument, over });
+      out.push({ cc, last, visit, allowed: v.days, viaDoc: !!v.viaDocument, route: v.route || null, over });
     }
   }
   return out;
@@ -2119,6 +2145,59 @@ const VISA_OPTIONS = {
 };
 function visaOptionsFor(cc, status) { return VISA_OPTIONS[`${cc}|${status}`] || null; }
 
+// Hand-checked ways in, per destination, beyond the one default category
+// and length the passport dataset knows. Checked against several
+// travel/consultancy sources in Oct 2026 (not the official portals, which
+// always have the final word, so every card links there). `routes` are in
+// order of preference; a route covers `days` plus `extendDays` from
+// extensions. `prep` = what to do before you fly to make arrival easy.
+const VISA_GUIDE = {
+  ID: {
+    portal: { label: 'evisa.imigrasi.go.id', url: 'https://evisa.imigrasi.go.id' },
+    prep: 'Buy the e-VOA online before you fly - you skip the visa payment queue on arrival.',
+    routes: [
+      { name: 'e-VOA / visa on arrival', days: 30, extendDays: 30,
+        fee: 'IDR 500,000, plus IDR 500,000 for the extension',
+        note: 'Extend once by 30 days (online or at an immigration office) before day 30 runs out.',
+        extendNote: 'one 30-day extension, online or at an immigration office' },
+      { name: 'C1 tourist visa (single entry)', days: 60, extendDays: 120, fee: 'see the portal',
+        prep: 'Apply for the C1 visa online before you fly - it is not sold on arrival.',
+        note: 'Apply online before you travel. Extendable twice by 60 days, in person. Ends when you leave Indonesia.',
+        extendNote: 'up to two 60-day extensions, in person at an immigration office' },
+    ],
+  },
+  NP: {
+    portal: { label: 'immigration.gov.np', url: 'https://www.immigration.gov.np' },
+    prep: 'Fill in the online arrival form on the Department of Immigration site in the days before you fly (the receipt is valid about 15 days). Screenshot it and go straight to the payment counter.',
+    routes: [
+      { name: '15-day visa on arrival', days: 15, fee: '$30' },
+      { name: '30-day visa on arrival', days: 30, fee: '$50' },
+      { name: '90-day visa on arrival', days: 90, fee: '$125' },
+    ],
+  },
+};
+const routeMax = (r) => r.days + (r.extendDays || 0);
+
+// The visa rule for a visit of `visitDays`. Where there's a guide it is the
+// source of truth (the dataset's one number can be off, e.g. Nepal's yearly
+// maximum listed as if it were a visa length): the first route long enough
+// for the plan, or the longest one if none is (`tooLong`). Your own
+// approved visa document always wins.
+function visaFor(cc, visitDays) {
+  const v = computeVisa(cc);
+  const g = VISA_GUIDE[cc];
+  if (!v || v.viaDocument || v.status === 'resident' || v.status === 'visa free' || !g || visitDays == null) return v;
+  const fits = g.routes.find(r => routeMax(r) >= visitDays);
+  const route = fits || g.routes.reduce((a, r) => (routeMax(r) > routeMax(a) ? r : a));
+  return {
+    ...v, route,
+    days: visitDays <= route.days ? route.days : routeMax(route),
+    baseDays: g.routes[0].days,
+    needsMore: visitDays > g.routes[0].days,   // the basic option alone isn't enough
+    tooLong: !fits,
+  };
+}
+
 // ── Nomad day-counting: rolling / calendar-year presence across ALL trips ──
 // All of the user's trips are needed here (not just the open one), since a
 // bloc or annual cap is spent across every trip that touched it. Fetched
@@ -2278,6 +2357,8 @@ async function renderVisaHeader(trip) {
   // While you're in the country: today's day number in this visit.
   // Otherwise: how long the next (or last) visit is planned to be.
   const visit = relevantVisit(worst.cc, currentStays, currentTransport, trip?.place_tags);
+  const eff = visit ? visaFor(worst.cc, visit.days) : null;
+  if (eff?.route) worst = { ...worst, days: eff.days };   // from the guide
   let bar = '';
   if (worst.days != null && visit) {
     const shown = visit.current ? visit.elapsed : visit.days;
@@ -2320,6 +2401,7 @@ function pastFoldedCutoff() {
 function itemEndDay(kind, d) {
   if (kind === 'gap') return addDaysStr(d.to, -1);   // last unplanned night
   if (kind === 'visa') return d.last;
+  if (kind === 'prep') return d.day;
   if (kind === 'stay') return d.end_date || d.start_date;
   if (kind === 'activity') return localDayStr(new Date(d.end_at || d.start_at));
   return localDayStr(new Date(d.arrival || d.departure));
@@ -2548,6 +2630,7 @@ function renderTimeline(stays, transport, activities = []) {
       .map(g => ({ kind: 'gap', when: g.from + 'T23:59:58', data: g })),
     // Start of the last allowed day, so it reads before that day's travel.
     ...visaDeadlines(currentTrip).map(d => ({ kind: 'visa', when: d.last + 'T00:00:01', data: d })),
+    ...visaPrep(currentTrip).map(d => ({ kind: 'prep', when: d.day + 'T00:00:00', data: d })),
     ...transport.map(t => ({ kind: 'transport', when: t.departure, data: t })),
     ...activities.map(a => ({ kind: 'activity', when: a.start_at, data: a })),
     // A stay only has a date, not a time, for when it starts — checking in
@@ -2591,18 +2674,40 @@ function renderTimeline(stays, transport, activities = []) {
     if (item.kind === 'visa') {
       const v = item.data;
       const name = COUNTRY_NAME[v.cc] || v.cc;
-      const title = v.over
+      const title = v.extend ? `${flagEmoji(v.cc)} ${name} - extend your visa by today`
+        : v.over
         ? `${flagEmoji(v.cc)} Overstay - ${v.over} day${v.over === 1 ? '' : 's'} past your ${name} visa`
         : `${flagEmoji(v.cc)} ${name} visa - last day`;
-      const sub = v.over
+      const sub = v.extend
+        ? `day ${v.allowed} of the ${v.extend.name} · ${v.extend.extendNote || `extension adds ${v.extend.extendDays} days`}`
+        : v.over
         ? `last allowed day ${fmtDate(v.last)} · planned until ${fmtDate(v.visit.to)}`
-        : `${v.allowed} days from ${fmtDate(v.visit.from)} · leave by ${fmtDate(v.last)}`;
+        : `${v.allowed} days from ${fmtDate(v.visit.from)}${v.route ? ` (${v.route.name})` : ''} · leave by ${fmtDate(v.last)}`;
       tl.insertAdjacentHTML('beforeend', `
         <div class="tl-item" style="animation-delay:${delay}s">
           <div class="tl-dot-wrap"><div class="tl-dot visa${v.over ? ' over' : ''}"></div></div>
           <div class="tl-card tl-visa${v.over ? ' over' : ''}">
             <div class="tl-title" style="margin-top:0">${esc(title)}</div>
             <div class="tl-sub">${esc(sub)}</div>
+          </div>
+        </div>`);
+      return;
+    }
+    if (item.kind === 'prep') {
+      const d = item.data;
+      const name = COUNTRY_NAME[d.cc] || d.cc;
+      const lines = [
+        d.tooLong ? `${d.visit.days} days planned - longer than any visa here (max ${routeMax(d.route)} days). Check the official site.`
+          : d.route && `${d.visit.days} days planned - the basic ${d.baseDays} days isn't enough. Plan for: ${d.route.name}${d.visit.days > d.route.days && d.route.extendDays ? ' + extension' : ''} (up to ${routeMax(d.route)} days).`,
+        d.prep,
+      ].filter(Boolean);
+      tl.insertAdjacentHTML('beforeend', `
+        <div class="tl-item" style="animation-delay:${delay}s">
+          <div class="tl-dot-wrap"><div class="tl-dot visa"></div></div>
+          <div class="tl-card tl-visa">
+            <div class="tl-title" style="margin-top:0">${flagEmoji(d.cc)} Before you fly to ${esc(name)}</div>
+            ${lines.map(l => `<div class="tl-sub">${esc(l)}</div>`).join('')}
+            <div class="tl-sub"><a href="${d.guide.portal.url}" target="_blank" rel="noopener">${esc(d.guide.portal.label)} ↗</a></div>
           </div>
         </div>`);
       return;
@@ -2861,17 +2966,30 @@ async function renderVisa(docs, trip) {
 
     guidance = `<div class="section-label" style="margin-top:0">Entry - travelling on ${flagEmoji(primary)} ${esc(COUNTRY_NAME[primary] || primary)}${cits.length > 1 ? ` (+${cits.length - 1})` : ''}</div>` +
       ccs.map(cc => {
-        const v = computeVisa(cc);
+        let v = computeVisa(cc);
         if (!v) return `<div class="visa-block"><div class="vb-country">${flagEmoji(cc)} ${esc(COUNTRY_NAME[cc] || cc)}</div><div class="vb-line">No data for this destination - check the official government site.</div></div>`;
         // Days actually planned in *this* country so far — not the whole
         // trip's span, which would wrongly assume a multi-country trip is
         // spent entirely in each tagged country (false alarms on the ones
         // you're only passing through, false reassurance on the rest).
         const ccDays = daysInCountry(cc, currentStays, currentTransport, trip?.place_tags);
+        const eff = visaFor(cc, ccDays);
         const notPlannedNote = `<div class="vb-line">No stays added for ${esc(COUNTRY_NAME[cc] || cc)} yet - add them here to check the actual length of this visit against the limit.</div>`;
         let bar = '';
-        if (v.days != null) {
-          const label = v.viaDocument ? 'Allowed stay (your visa)' : 'Max visa-free stay';
+        if (eff?.route && eff.needsMore && !eff.tooLong) {
+          // The default visa is too short, but there's a way to cover the plan.
+          const r = eff.route;
+          const pct = Math.min((ccDays / eff.days) * 100, 100);
+          bar = `<div class="vb-line">Basic option: <b>${eff.baseDays} days</b> - not enough for the <b>${ccDays} days</b> planned.</div>
+            <div class="vb-line" style="color:var(--amber)">Plan for: <b>${esc(r.name)}${ccDays > r.days && r.extendDays ? ' + extension' : ''}</b> - up to ${routeMax(r)} days · ${esc(r.fee)}</div>
+            ${r.note ? `<div class="vb-line">${esc(r.note)}</div>` : ''}
+            <div class="vb-line"><div class="vb-bar-wrap"><div class="vb-bar" style="width:${pct}%;background:var(--amber)"></div></div>${ccDays} of ${eff.days} days with that visa</div>`;
+        } else if ((eff || v).days != null) {
+          const label = v.viaDocument ? 'Allowed stay (your visa)'
+            : eff?.tooLong ? `Longest visa (${eff.route.name})`
+            : eff?.route ? eff.route.name
+            : v.status === 'visa free' ? 'Max visa-free stay' : `Standard ${v.label.toLowerCase()}`;
+          v = { ...v, days: (eff || v).days };
           if (ccDays != null) {
             const pct = Math.min((ccDays / v.days) * 100, 100);
             const tone = ccDays > v.days ? 'vb-red' : (ccDays >= v.days * 0.8 ? 'vb-amber' : 'vb-green');
@@ -2879,7 +2997,7 @@ async function renderVisa(docs, trip) {
             bar = `<div class="vb-line">${label}: <b>${v.days} days</b></div>
               <div class="vb-line">Planned so far: ${ccDays} days
                 <div class="vb-bar-wrap"><div class="vb-bar" style="width:${pct}%;background:${barColor}"></div></div>
-                ${ccDays > v.days ? `<b style="color:var(--red)">exceeds ${v.viaDocument ? 'your visa\'s' : 'the visa-free'} limit</b>` : ccDays >= v.days * 0.8 ? '<span style="color:var(--amber)">close to the limit</span>' : 'well within'}
+                ${ccDays > v.days ? `<b style="color:var(--red)">exceeds ${v.viaDocument ? 'your visa\'s' : eff?.tooLong ? 'the longest visa\'s' : v.status === 'visa free' ? 'the visa-free' : 'the visa\'s'} limit${VISA_GUIDE[cc] || v.viaDocument ? '' : ' - no longer option on file, check the official site'}</b>` : ccDays >= v.days * 0.8 ? '<span style="color:var(--amber)">close to the limit</span>' : 'well within'}
               </div>`;
           } else {
             bar = `<div class="vb-line">${label}: <b>${v.days} days</b></div>${notPlannedNote}`;
@@ -2947,7 +3065,10 @@ async function renderVisa(docs, trip) {
           <div class="ic-details">
             ${docSummary}
             ${explain ? `<div class="vb-line">${esc(explain.how)}</div>` : ''}
-            ${options ? `<div class="vb-line">Options at the border: ${options.map(o => `<b>${o.days} days</b> (${esc(o.fee)})`).join(' · ')} - multiple-entry rates, confirm current fees officially.</div>` : ''}
+            ${VISA_GUIDE[cc] && !v.viaDocument ? `<div class="vb-line" style="margin-top:6px"><b>Before you fly:</b> ${esc(eff?.route?.prep || VISA_GUIDE[cc].prep)}</div>
+              <div class="vb-line">Ways in: ${VISA_GUIDE[cc].routes.map(r => `${esc(r.name)} (${routeMax(r)} days, ${esc(r.fee)})`).join(' · ')}</div>
+              <div class="vb-line"><a href="${VISA_GUIDE[cc].portal.url}" target="_blank" rel="noopener">${esc(VISA_GUIDE[cc].portal.label)} ↗</a> - official, check before you pay</div>` : ''}
+            ${options && !VISA_GUIDE[cc] ? `<div class="vb-line">Options at the border: ${options.map(o => `<b>${o.days} days</b> (${esc(o.fee)})`).join(' · ')} - multiple-entry rates, confirm current fees officially.</div>` : ''}
             ${v.days != null ? `<div class="vb-line">Permitted stay on this basis: <b>${v.days} days</b> per entry.</div>` : ''}
             ${portal ? `<div class="vb-line"><a href="${portal.url}" target="_blank" rel="noopener">${portal.label}</a></div>` : ''}
             <div class="vb-line"><a href="https://www.google.com/search?q=${encodeURIComponent((COUNTRY_NAME[cc] || cc) + ' entry requirements ' + primaryName + ' citizens official government')}" target="_blank" rel="noopener">full official requirements ↗</a></div>
