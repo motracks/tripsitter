@@ -618,20 +618,29 @@ function tripStatus(trip) {
 // What's happening right now for this trip: mid-flight/bus/train, or settled
 // into a stay. Null when nothing overlaps "now" (gap between legs, or trip
 // isn't ongoing).
+// Where you are right now: mid-journey, at a stay, or — if a leg landed
+// after the stay you're "in" began (you've left it, or the next stay isn't
+// booked) — at that leg's destination ('arrived').
 function currentTravelState(stays, transport) {
   const now = new Date();
+  let lastArrival = null;
   for (const t of (transport || [])) {
     if (!t.departure || !t.arrival) continue;
     const dep = new Date(t.departure), arr = new Date(t.arrival);
     if (now >= dep && now <= arr) return { kind: 'transport', data: t };
+    if (arr < now && now - arr < 2 * 86400000 && (!lastArrival || arr > new Date(lastArrival.arrival))) lastArrival = t;
   }
+  let stay = null;
   for (const s of (stays || [])) {
     if (!s.start_date || !s.end_date) continue;
     const start = new Date(s.start_date + 'T00:00:00');
     const end = new Date(s.end_date + 'T23:59:59');
-    if (now >= start && now <= end) return { kind: 'stay', data: s };
+    if (now >= start && now <= end && (!stay || s.start_date > stay.start_date)) stay = s;
   }
-  return null;
+  // A stay starting on (or after) the landing day is where that leg took you.
+  if (lastArrival && (!stay || stay.start_date < localDayStr(new Date(lastArrival.arrival))))
+    return { kind: 'arrived', data: lastArrival };
+  return stay ? { kind: 'stay', data: stay } : null;
 }
 function currentStatusText(state) {
   if (!state) return '';
@@ -640,7 +649,13 @@ function currentStatusText(state) {
     const mode = (t.type || '').toLowerCase();
     const verb = mode === 'flight' ? 'Flying' : mode === 'train' ? 'On the train'
       : mode === 'bus' ? 'On the bus' : mode === 'ferry' ? 'On the ferry' : 'Travelling';
-    return `${verb} to ${t.destination || 'destination'}`;
+    const place = mode === 'flight' ? cityOnly(formatFlightPlace(t.destination)) : t.destination;
+    return `${verb} to ${place || 'destination'}`;
+  }
+  if (state.kind === 'arrived') {
+    const t = state.data;
+    const place = (t.type || '').toLowerCase() === 'flight' ? formatFlightPlace(t.destination) : t.destination;
+    return `Currently in ${cityOnly(place) || 'destination'}`;
   }
   return `Currently in ${state.data.city || 'stay'}`;
 }
@@ -1210,8 +1225,20 @@ function renderCurrentStatus() {
   const state = currentTravelState(currentStays, currentTransport);
   if (!state) { el.classList.add('hidden'); el.innerHTML = ''; return; }
   el.classList.remove('hidden');
-  el.innerHTML = `<span class="status-dot${state.kind === 'transport' ? ' pulse' : ''}"></span> ${esc(currentStatusText(state))}`;
+  el.innerHTML = `<span class="status-dot${state.kind === 'transport' ? ' pulse' : ''}"></span> ${esc(currentStatusText(state))}`
+    + (state.kind === 'transport'
+      ? `<button class="btn btn-ghost btn-sm" style="margin-left:auto" onclick="markArrived('${state.data.id}')">arrived ✓</button>` : '');
 }
+// Landed / pulled in early: set the leg's arrival to now.
+window.markArrived = async (id) => {
+  const t = currentTransport.find(x => x.id === id);
+  if (!t) return;
+  const arrival = new Date().toISOString();
+  const { error } = await sb.from('transport').update({ arrival }).eq('id', id);
+  if (error) { alert(error.message); return; }
+  t.arrival = arrival;
+  openTrip(currentTrip.id);
+};
 
 async function renderTripMapForCurrentTrip() {
   const wrap = $('trip-map');
@@ -2128,6 +2155,20 @@ function computeVisa(destCC) {
   };
 }
 
+// Country code of where you are now (see currentTravelState), via the
+// trip's place tags, or the airport table for a flight with no coordinates.
+function currentCountry(trip) {
+  const state = currentTravelState(currentStays, currentTransport);
+  if (!state) return null;
+  if (state.kind === 'stay') return nearestPlaceTag(state.data, trip?.place_tags)?.country || null;
+  const t = state.data;
+  const tag = nearestPlaceTagForPoint(t.dest_lat, t.dest_lng, trip?.place_tags)
+    || placeTagForCity(cityOnly(t.destination), trip?.place_tags);
+  if (tag?.country) return tag.country;
+  const code = extractIATA(t.destination);
+  return (code && AIRPORTS?.[code]?.country) || null;
+}
+
 async function renderVisaHeader(trip) {
   await loadVisaData();
   const el = $('visa-header');
@@ -2136,9 +2177,13 @@ async function renderVisaHeader(trip) {
     el.innerHTML = `<div class="esta-label" style="text-align:right">visa — set citizenship &amp; destination</div>`;
     return;
   }
-  // worst (most restrictive) rule across destination countries
+  // The country you're in right now, if it's one of the trip's; otherwise
+  // the most restrictive rule across the trip's destinations.
   let worst = null;
-  for (const cc of ccs) {
+  const hereCc = currentCountry(trip);
+  const hereVisa = hereCc && ccs.includes(hereCc) ? computeVisa(hereCc) : null;
+  if (hereVisa && hereVisa.status !== 'resident') worst = { ...hereVisa, cc: hereCc };
+  else for (const cc of ccs) {
     const v = computeVisa(cc);
     if (v && v.status !== 'resident' && (!worst || VISA_RANK[v.status] > VISA_RANK[worst.status])) worst = { ...v, cc };
   }
